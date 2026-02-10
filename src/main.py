@@ -70,6 +70,7 @@ async def on_ready():
         'cogs.challenge',
         'cogs.shop',
         'cogs.ranking',
+        'cogs.admin',  # 관리자 명령어 (Hot Reload)
         'skills.flask_admin',  # Flask 서버 관리 Skill
     ]
 
@@ -82,13 +83,37 @@ async def on_ready():
 
 @bot.event
 async def on_command_error(ctx, error):
-    """전역 에러 핸들러"""
+    """전역 에러 핸들러 (개선된 버전)"""
     if isinstance(error, commands.CommandNotFound):
         return  # 무시
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(f"❌ 필수 인자가 누락되었습니다: `{error.param.name}`", delete_after=10)
+    elif isinstance(error, commands.CheckFailure):
+        # 권한 부족 (예: @commands.is_owner())
+        await ctx.send("❌ 이 명령어를 실행할 권한이 없습니다.", delete_after=10)
+    elif isinstance(error, commands.CommandInvokeError):
+        # 명령어 실행 중 발생한 실제 에러
+        original_error = error.original
+        logger.error(
+            f'명령어 실행 중 에러 발생\n'
+            f'  - 명령어: {ctx.command}\n'
+            f'  - 사용자: {ctx.author} (ID: {ctx.author.id})\n'
+            f'  - 채널: {ctx.channel} (ID: {ctx.channel.id})\n'
+            f'  - 에러 타입: {type(original_error).__name__}\n'
+            f'  - 에러 메시지: {original_error}',
+            exc_info=error.original
+        )
+        await ctx.send("❌ 명령어 실행 중 오류가 발생했습니다. 관리자에게 문의하세요.", delete_after=10)
     else:
-        logger.error(f'에러 발생: {error}', exc_info=True)
+        # 기타 에러
+        logger.error(
+            f'알 수 없는 에러\n'
+            f'  - 명령어: {ctx.command}\n'
+            f'  - 사용자: {ctx.author} (ID: {ctx.author.id})\n'
+            f'  - 에러 타입: {type(error).__name__}\n'
+            f'  - 에러: {error}',
+            exc_info=True
+        )
         await ctx.send("❌ 명령어 실행 중 오류가 발생했습니다.", delete_after=10)
 
 if __name__ == '__main__':

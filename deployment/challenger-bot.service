@@ -1,0 +1,23 @@
+[Unit]
+Description=Discord Challenge Bot
+After=network.target
+
+[Service]
+Type=simple
+# 사용자명을 실제 시스템 사용자로 변경하세요
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/challenger-bot-mk2
+# Python 경로를 확인하세요 (which python3)
+ExecStart=/usr/bin/python3 src/main.py
+Restart=always
+RestartSec=10
+
+# 환경 변수 (선택 사항)
+# Environment="PYTHONUNBUFFERED=1"
+
+# 로그 관리
+StandardOutput=append:/path/to/challenger-bot-mk2/logs/systemd.log
+StandardError=append:/path/to/challenger-bot-mk2/logs/systemd-error.log
+
+[Install]
+WantedBy=multi-user.target
