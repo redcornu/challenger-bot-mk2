@@ -77,15 +77,6 @@ class ChallengeCog(commands.Cog):
         """일일 인증 (사진 필수)"""
         # 중복 실행 추적을 위한 로그
         self.logger.info(f"[인증 시작] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 메시지 ID: {ctx.message.id}")
-        
-        # 사진 첨부 확인
-        if not ctx.message.attachments:
-            embed = EmbedBuilder.error(
-                "사진 필요",
-                "인증샷을 함께 첨부해주세요!"
-            )
-            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
-            return
 
         # 도전 조회
         challenge = get_challenge(ctx.channel.id)
@@ -99,6 +90,15 @@ class ChallengeCog(commands.Cog):
 
         # 소유권 확인
         if not await self._check_ownership(ctx, challenge):
+            return
+
+        # 사진 첨부 확인
+        if not ctx.message.attachments:
+            embed = EmbedBuilder.error(
+                "사진 필요",
+                "인증샷을 함께 첨부해주세요!"
+            )
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return
 
         # 중복 인증 방지

@@ -2,7 +2,7 @@ import sqlite3
 import json
 import logging
 from contextlib import contextmanager
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from config import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -241,3 +241,51 @@ def update_challenge_admin(thread_id: int, state: str = None,
     except Exception as e:
         logger.error(f"Failed to admin update challenge {thread_id}: {type(e).__name__}: {e}")
         return False
+
+
+def verify_database_integrity() -> Dict[str, Any]:
+    """데이터베이스 무결성 검증
+
+    Returns:
+        dict: {
+            'orphaned_count': int,
+            'orphaned_challenges': List[Dict],
+            'null_count': int,
+            'is_valid': bool
+        }
+    """
+    with get_db_connection() as conn:
+        c = conn.cursor()
+
+        # Orphaned challenges 확인
+        c.execute('''
+            SELECT COUNT(*) as cnt
+            FROM duck_challenge dc
+            LEFT JOIN users u ON dc.user_id = u.user_id
+            WHERE u.user_id IS NULL
+        ''')
+        orphaned_count = c.fetchone()['cnt']
+
+        # Orphaned challenges 상세 정보
+        c.execute('''
+            SELECT dc.thread_id, dc.user_id, dc.goal_text
+            FROM duck_challenge dc
+            LEFT JOIN users u ON dc.user_id = u.user_id
+            WHERE u.user_id IS NULL
+        ''')
+        orphaned_challenges = [dict(row) for row in c.fetchall()]
+
+        # NULL 값 확인
+        c.execute('''
+            SELECT COUNT(*) as cnt
+            FROM duck_challenge
+            WHERE user_id IS NULL OR goal_text IS NULL OR state IS NULL
+        ''')
+        null_count = c.fetchone()['cnt']
+
+        return {
+            'orphaned_count': orphaned_count,
+            'orphaned_challenges': orphaned_challenges,
+            'null_count': null_count,
+            'is_valid': orphaned_count == 0 and null_count == 0
+        }

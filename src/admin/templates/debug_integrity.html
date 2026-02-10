@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}데이터 무결성 검증{% endblock %}
+
+{% block content %}
+<h2>🔍 데이터베이스 무결성 검증</h2>
+
+{% if is_valid %}
+<div class="alert alert-success">
+    ✅ 데이터베이스 무결성 검증 통과
+</div>
+{% else %}
+<div class="alert alert-error">
+    ❌ 데이터 무결성 문제 발견
+</div>
+{% endif %}
+
+<h3>검증 결과</h3>
+<ul>
+    <li>Orphaned Challenges: {{ integrity.orphaned_count }}개</li>
+    <li>NULL 값: {{ integrity.null_count }}개</li>
+</ul>
+
+{% if integrity.orphaned_challenges %}
+<h3>⚠️ Orphaned Challenges 목록</h3>
+<table class="user-table">
+    <thead>
+        <tr>
+            <th>Thread ID</th>
+            <th>User ID</th>
+            <th>목표</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ch in integrity.orphaned_challenges %}
+        <tr>
+            <td>{{ ch.thread_id }}</td>
+            <td>{{ ch.user_id }}</td>
+            <td>{{ ch.goal_text }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

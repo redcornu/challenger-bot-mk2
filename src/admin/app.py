@@ -159,12 +159,19 @@ def edit_user(user_id):
 def api_get_user(user_id):
     """API: 유저 정보 조회 (모달용)"""
     try:
+        logger.info(f"[API] 유저 조회 요청: user_id={user_id}")
+
         # 유저 기본 정보 조회
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
             user_row = c.fetchone()
             if not user_row:
+                logger.error(f"[API] 유저를 찾을 수 없음: user_id={user_id}")
+                # 모든 user_id 목록 로깅 (디버깅용)
+                c.execute("SELECT user_id FROM users ORDER BY user_id")
+                all_user_ids = [row['user_id'] for row in c.fetchall()]
+                logger.info(f"[API] 데이터베이스 user_id 목록: {all_user_ids}")
                 return jsonify({'success': False, 'message': '유저를 찾을 수 없습니다.'}), 404
             user = dict(user_row)
 
@@ -209,6 +216,8 @@ def api_update_user(user_id):
     """API: 유저 정보 업데이트 (모달용)"""
     try:
         data = request.get_json()
+        logger.info(f"[API] 유저 업데이트 요청: user_id={user_id}")
+        logger.info(f"[API] 업데이트 데이터: {data}")
 
         # 유저 기본 정보 업데이트
         gold = int(data.get('gold', 0))
@@ -223,6 +232,12 @@ def api_update_user(user_id):
 
         with get_db_connection() as conn:
             c = conn.cursor()
+            # 유저 존재 확인 로깅
+            c.execute("SELECT COUNT(*) as cnt FROM users WHERE user_id = ?", (user_id,))
+            if c.fetchone()['cnt'] == 0:
+                logger.error(f"[API] 업데이트 실패: user_id={user_id} 없음")
+                return jsonify({'success': False, 'message': '유저를 찾을 수 없습니다.'}), 404
+
             c.execute('''
                 UPDATE users
                 SET gold = ?, ducks_raised = ?, updated_at = CURRENT_TIMESTAMP
@@ -294,6 +309,20 @@ def api_update_user(user_id):
             'success': False,
             'message': f'오류가 발생했습니다: {str(e)}'
         }), 500
+
+
+@app.route('/debug/integrity')
+@login_required
+def debug_integrity():
+    """데이터베이스 무결성 검증 페이지"""
+    from database import verify_database_integrity
+
+    result = verify_database_integrity()
+
+    return render_template('debug_integrity.html',
+                         integrity=result,
+                         is_valid=result['is_valid'])
+
 
 if __name__ == '__main__':
     from config import FLASK_HOST, FLASK_PORT

@@ -18,7 +18,9 @@
             const data = await response.json();
 
             if (!data.success) {
-                showError(data.message);
+                const errorMsg = data.message || '유저 정보를 불러올 수 없습니다.';
+                console.error('[Modal] API 오류:', errorMsg, '(user_id:', userId, ')');
+                showError(`${errorMsg} (user_id: ${userId})`);
                 return;
             }
 
