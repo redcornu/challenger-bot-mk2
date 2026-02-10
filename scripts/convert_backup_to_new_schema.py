@@ -192,7 +192,10 @@ def migrate_challenges(skip_threads=None):
 
         try:
             # sulky_days → growth_days 변환
-            growth_days = ch.get('sulky_days', 0)
+            try:
+                growth_days = ch['sulky_days']
+            except (KeyError, IndexError):
+                growth_days = 0
 
             nc.execute('''
                 INSERT INTO duck_challenge (
