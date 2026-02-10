@@ -1,0 +1,22 @@
+[Unit]
+Description=Challenger Discord Bot (오리와 66일의 약속)
+After=network.target
+Wants=challenger-flask.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/challenger-bot-mk2
+Environment="PATH=/home/ubuntu/challenger-bot-mk2/venv/bin"
+ExecStart=/home/ubuntu/challenger-bot-mk2/venv/bin/python src/main.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/challenger-bot-mk2/logs/discord_bot.log
+StandardError=append:/home/ubuntu/challenger-bot-mk2/logs/discord_bot.log
+
+# 보안 설정
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

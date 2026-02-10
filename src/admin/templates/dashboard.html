@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}대시보드{% endblock %}
+
+{% block content %}
+<h2>📊 시스템 통계</h2>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">👥</div>
+        <div class="stat-info">
+            <h3>총 유저 수</h3>
+            <p class="stat-value">{{ total_users }}</p>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon">🎓</div>
+        <div class="stat-info">
+            <h3>졸업한 오리</h3>
+            <p class="stat-value">{{ total_ducks }}</p>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon">📝</div>
+        <div class="stat-info">
+            <h3>진행 중인 도전</h3>
+            <p class="stat-value">{{ total_challenges }}</p>
+        </div>
+    </div>
+</div>
+
+<div class="quick-links">
+    <h3>🔗 빠른 메뉴</h3>
+    <a href="{{ url_for('users_list') }}" class="btn btn-primary">유저 관리</a>
+</div>
+{% endblock %}

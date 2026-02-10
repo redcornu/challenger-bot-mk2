@@ -1,0 +1,21 @@
+[Unit]
+Description=Challenger Flask Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/challenger-bot-mk2
+Environment="PATH=/home/ubuntu/challenger-bot-mk2/venv/bin"
+ExecStart=/home/ubuntu/challenger-bot-mk2/venv/bin/python src/admin/app.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/challenger-bot-mk2/logs/flask.log
+StandardError=append:/home/ubuntu/challenger-bot-mk2/logs/flask.log
+
+# 보안 설정
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

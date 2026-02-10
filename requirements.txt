@@ -1,0 +1,19 @@
+discord.py>=2.4.0
+python-dotenv==1.0.0
+
+# Web Dashboard
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Monitoring & HTTP
+psutil==5.9.6
+requests==2.31.0
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Code Quality (Optional)
+black==23.12.1
+isort==5.13.2
+flake8==7.0.0

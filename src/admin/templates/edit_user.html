@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}유저 수정{% endblock %}
+
+{% block content %}
+<h2>✏️ 유저 정보 수정</h2>
+
+<div class="form-container">
+    <form method="POST">
+        <div class="form-group">
+            <label>유저 ID</label>
+            <input type="text" value="{{ user.user_id }}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label>유저명</label>
+            <input type="text" value="{{ user.username or '(없음)' }}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label for="gold">골드</label>
+            <input type="number" id="gold" name="gold" value="{{ user.gold }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="ducks_raised">졸업한 오리 수</label>
+            <input type="number" id="ducks_raised" name="ducks_raised" value="{{ user.ducks_raised }}" required>
+        </div>
+
+        {% if challenge %}
+        <hr style="margin: 2rem 0; border: none; border-top: 2px solid #e0e0e0;">
+        
+        <h3 style="margin-bottom: 1rem; color: #2196F3;">🦆 활성 도전 정보</h3>
+        
+        <input type="hidden" name="challenge_id" value="{{ challenge.thread_id }}">
+        
+        <div class="form-group">
+            <label>도전 목표</label>
+            <input type="text" value="{{ challenge.goal_text }}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label>스레드 ID</label>
+            <input type="text" value="{{ challenge.thread_id }}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label for="state">오리 상태</label>
+            <select id="state" name="state" required>
+                {% for value, label in state_options %}
+                <option value="{{ value }}" {% if challenge.state == value %}selected{% endif %}>
+                    {{ label }} ({{ value }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="streak">연속 도전 일수</label>
+            <input type="number" id="streak" name="streak" value="{{ challenge.streak }}" min="0" required>
+            <small style="color: #666;">현재 연속으로 인증한 일수</small>
+        </div>
+
+        <div class="form-group">
+            <label for="total_days">총 도전 일수</label>
+            <input type="number" id="total_days" name="total_days" value="{{ challenge.total_days }}" min="0" required>
+            <small style="color: #666;">전체 인증한 일수 (누적)</small>
+        </div>
+
+        <div class="form-group">
+            <label>마지막 인증 날짜</label>
+            <input type="text" value="{{ challenge.last_auth_date or '(없음)' }}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label>생성 날짜</label>
+            <input type="text" value="{{ challenge.created_at }}" disabled>
+        </div>
+        {% else %}
+        <hr style="margin: 2rem 0; border: none; border-top: 2px solid #e0e0e0;">
+        <p style="text-align: center; color: #999; padding: 2rem;">활성화된 도전이 없습니다.</p>
+        {% endif %}
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">💾 저장</button>
+            <a href="{{ url_for('users_list') }}" class="btn btn-secondary">취소</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

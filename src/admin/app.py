@@ -1,0 +1,300 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from database import get_db_connection, get_user_challenges, update_challenge_admin
+from admin.auth import login_required, verify_password
+from config import BotStates, STATE_KOREAN
+
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """로그인 페이지"""
+    if request.method == 'POST':
+        password = request.form.get('password')
+        if verify_password(password):
+            session['logged_in'] = True
+            return redirect(url_for('dashboard'))
+        flash('비밀번호가 틀렸습니다.', 'error')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """로그아웃"""
+    session.pop('logged_in', None)
+    flash('로그아웃되었습니다.', 'info')
+    return redirect(url_for('login'))
+
+@app.route('/')
+def index():
+    """루트 경로 - 로그인 여부에 따라 리다이렉트"""
+    if session.get('logged_in'):
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """대시보드 메인"""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) as total FROM users")
+        total_users = c.fetchone()['total']
+        c.execute("SELECT SUM(ducks_raised) as total FROM users")
+        total_ducks = c.fetchone()['total'] or 0
+        c.execute("SELECT COUNT(*) as total FROM duck_challenge")
+        total_challenges = c.fetchone()['total']
+
+    return render_template('dashboard.html',
+                          total_users=total_users,
+                          total_ducks=total_ducks,
+                          total_challenges=total_challenges)
+
+@app.route('/users')
+@login_required
+def users_list():
+    """유저 목록"""
+    search = request.args.get('search', '')
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        if search:
+            c.execute('''
+                SELECT * FROM users
+                WHERE username LIKE ? OR CAST(user_id AS TEXT) LIKE ?
+                ORDER BY ducks_raised DESC
+            ''', (f'%{search}%', f'%{search}%'))
+        else:
+            c.execute('SELECT * FROM users ORDER BY ducks_raised DESC')
+        users = [dict(row) for row in c.fetchall()]
+    return render_template('users.html', users=users, search=search)
+
+@app.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_user(user_id):
+    """유저 정보 수정"""
+    if request.method == 'POST':
+        # 유저 기본 정보 업데이트
+        gold = int(request.form.get('gold', 0))
+        ducks_raised = int(request.form.get('ducks_raised', 0))
+
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('''
+                UPDATE users
+                SET gold = ?, ducks_raised = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            ''', (gold, ducks_raised, user_id))
+
+        # 도전 정보 업데이트 (있는 경우)
+        challenge_id = request.form.get('challenge_id')
+        if challenge_id:
+            # 상태 값 검증
+            state = request.form.get('state')
+            valid_states = [
+                BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
+                BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
+            ]
+            if state not in valid_states:
+                flash(f'유효하지 않은 상태값: {state}', 'error')
+                return redirect(url_for('edit_user', user_id=user_id))
+            
+            streak = int(request.form.get('streak', 0))
+            total_days = int(request.form.get('total_days', 0))
+            
+            # 음수 검증
+            if streak < 0 or total_days < 0:
+                flash('연속 일수와 총 일수는 0 이상이어야 합니다.', 'error')
+                return redirect(url_for('edit_user', user_id=user_id))
+            
+            success = update_challenge_admin(
+                thread_id=int(challenge_id),
+                state=state,
+                streak=streak,
+                total_days=total_days
+            )
+            
+            if not success:
+                flash('도전 정보 업데이트에 실패했습니다.', 'warning')
+
+        flash('유저 정보가 업데이트되었습니다.', 'success')
+        return redirect(url_for('users_list'))
+
+    # GET 요청: 유저 정보 및 활성 도전 조회
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user_row = c.fetchone()
+        if not user_row:
+            flash('유저를 찾을 수 없습니다.', 'error')
+            return redirect(url_for('users_list'))
+        user = dict(user_row)
+    
+    # 활성 도전 조회 (가장 최근 것)
+    challenges = get_user_challenges(user_id)
+    active_challenge = challenges[0] if challenges else None
+    
+    # 상태 선택 옵션
+    state_options = [
+        ('EGG', STATE_KOREAN[BotStates.EGG]),
+        ('DUCKLING', STATE_KOREAN[BotStates.DUCKLING]),
+        ('ADOLESCENT', STATE_KOREAN[BotStates.ADOLESCENT]),
+        ('ADULT', STATE_KOREAN[BotStates.ADULT]),
+        ('SULKY', STATE_KOREAN[BotStates.SULKY]),
+        ('RUNAWAY', STATE_KOREAN[BotStates.RUNAWAY]),
+        ('DONE', STATE_KOREAN[BotStates.DONE]),
+    ]
+    
+    return render_template('edit_user.html',
+                         user=user,
+                         challenge=active_challenge,
+                         state_options=state_options,
+                         state_korean=STATE_KOREAN)
+
+@app.route('/api/users/<int:user_id>', methods=['GET'])
+@login_required
+def api_get_user(user_id):
+    """API: 유저 정보 조회 (모달용)"""
+    try:
+        # 유저 기본 정보 조회
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            user_row = c.fetchone()
+            if not user_row:
+                return jsonify({'success': False, 'message': '유저를 찾을 수 없습니다.'}), 404
+            user = dict(user_row)
+
+        # 활성 도전 조회
+        challenges = get_user_challenges(user_id)
+        active_challenge = challenges[0] if challenges else None
+
+        # 상태 선택 옵션
+        state_options = [
+            {'value': 'EGG', 'label': STATE_KOREAN[BotStates.EGG]},
+            {'value': 'DUCKLING', 'label': STATE_KOREAN[BotStates.DUCKLING]},
+            {'value': 'ADOLESCENT', 'label': STATE_KOREAN[BotStates.ADOLESCENT]},
+            {'value': 'ADULT', 'label': STATE_KOREAN[BotStates.ADULT]},
+            {'value': 'SULKY', 'label': STATE_KOREAN[BotStates.SULKY]},
+            {'value': 'RUNAWAY', 'label': STATE_KOREAN[BotStates.RUNAWAY]},
+            {'value': 'DONE', 'label': STATE_KOREAN[BotStates.DONE]},
+        ]
+
+        return jsonify({
+            'success': True,
+            'user': {
+                'user_id': user['user_id'],
+                'username': user['username'],
+                'gold': user['gold'],
+                'ducks_raised': user['ducks_raised']
+            },
+            'challenge': {
+                'thread_id': active_challenge['thread_id'],
+                'state': active_challenge['state'],
+                'streak': active_challenge['streak'],
+                'total_days': active_challenge['total_days'],
+                'goal_text': active_challenge['goal_text']
+            } if active_challenge else None,
+            'state_options': state_options
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/users/<int:user_id>/update', methods=['POST'])
+@login_required
+def api_update_user(user_id):
+    """API: 유저 정보 업데이트 (모달용)"""
+    try:
+        data = request.get_json()
+
+        # 유저 기본 정보 업데이트
+        gold = int(data.get('gold', 0))
+        ducks_raised = int(data.get('ducks_raised', 0))
+
+        # 음수 검증
+        if gold < 0 or ducks_raised < 0:
+            return jsonify({
+                'success': False,
+                'message': '골드와 졸업 오리는 0 이상이어야 합니다.'
+            }), 400
+
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('''
+                UPDATE users
+                SET gold = ?, ducks_raised = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            ''', (gold, ducks_raised, user_id))
+
+        # 도전 정보 업데이트 (있는 경우)
+        challenge_id = data.get('challenge_id')
+        if challenge_id:
+            state = data.get('state')
+
+            # 상태 값 검증
+            valid_states = [
+                BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
+                BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
+            ]
+            if state not in valid_states:
+                return jsonify({
+                    'success': False,
+                    'message': f'유효하지 않은 상태값: {state}'
+                }), 400
+
+            streak = int(data.get('streak', 0))
+            total_days = int(data.get('total_days', 0))
+
+            # 음수 검증
+            if streak < 0 or total_days < 0:
+                return jsonify({
+                    'success': False,
+                    'message': '연속 일수와 총 일수는 0 이상이어야 합니다.'
+                }), 400
+
+            success = update_challenge_admin(
+                thread_id=int(challenge_id),
+                state=state,
+                streak=streak,
+                total_days=total_days
+            )
+
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'message': '도전 정보 업데이트에 실패했습니다.'
+                }), 500
+
+        # 업데이트된 유저 정보 조회
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            updated_user = dict(c.fetchone())
+
+        return jsonify({
+            'success': True,
+            'message': '유저 정보가 업데이트되었습니다.',
+            'updated_user': {
+                'user_id': updated_user['user_id'],
+                'username': updated_user['username'],
+                'gold': updated_user['gold'],
+                'ducks_raised': updated_user['ducks_raised']
+            }
+        })
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': '잘못된 입력 값입니다.'
+        }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'오류가 발생했습니다: {str(e)}'
+        }), 500
+
+if __name__ == '__main__':
+    from config import FLASK_HOST, FLASK_PORT
+    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False)

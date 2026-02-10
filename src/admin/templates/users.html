@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}유저 관리{% endblock %}
+
+{% block content %}
+<h2>👥 유저 관리</h2>
+
+<div class="search-box">
+    <form method="GET">
+        <input type="text" name="search" placeholder="유저명 또는 ID 검색..." value="{{ search }}">
+        <button type="submit" class="btn btn-secondary">검색</button>
+    </form>
+</div>
+
+<table class="user-table">
+    <thead>
+        <tr>
+            <th>유저 ID</th>
+            <th>유저명</th>
+            <th>졸업 오리</th>
+            <th>골드</th>
+            <th>생성일</th>
+            <th>작업</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.user_id }}</td>
+            <td>{{ user.username or '(없음)' }}</td>
+            <td>🎓 {{ user.ducks_raised }}</td>
+            <td>💰 {{ user.gold }}G</td>
+            <td>{{ user.created_at[:10] }}</td>
+            <td>
+                <button class="btn btn-sm btn-edit" data-user-id="{{ user.user_id }}">수정</button>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6" class="text-center">유저가 없습니다.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- 편집 모달 -->
+<div id="edit-modal" class="modal">
+    <div class="modal-content">
+        <span class="modal-close">&times;</span>
+        <h3>유저 정보 수정</h3>
+        <div id="modal-body"></div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{
+  "project_name": "",
+  "created_at": "2026-02-07T22:17:23.159357",
+  "current_phase": 1,
+  "phases": {
+    "1": {
+      "name": "프로젝트 초기 설정",
+      "status": "in_progress",
+      "completed_steps": []
+    },
+    "2": {
+      "name": "핵심 아키텍처 구현",
+      "status": "pending",
+      "completed_steps": []
+    },
+    "3": {
+      "name": "Cogs 패턴 명령어 구현",
+      "status": "pending",
+      "completed_steps": []
+    },
+    "4": {
+      "name": "테스트 및 검증",
+      "status": "pending",
+      "completed_steps": []
+    },
+    "5": {
+      "name": "배포 및 문서화",
+      "status": "pending",
+      "completed_steps": []
+    }
+  }
+}

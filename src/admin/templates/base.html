@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}관리자 대시보드{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='modal.js') }}" defer></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <h1>🦆 Challenger Bot 관리자</h1>
+            {% if session.logged_in %}
+            <div class="nav-links">
+                <a href="{{ url_for('dashboard') }}">대시보드</a>
+                <a href="{{ url_for('users_list') }}">유저 관리</a>
+                <a href="{{ url_for('logout') }}">로그아웃</a>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>© 2026 Challenger Bot MK2 - 관리자 대시보드</p>
+    </footer>
+</body>
+</html>
