@@ -146,15 +146,19 @@ sudo ufw enable
 
 ```bash
 cd /home/ubuntu
-git clone <REPOSITORY_URL> challenger-bot-mk2
+git clone https://github.com/redcornu/challenger-bot-mk2.git
 cd challenger-bot-mk2
 ```
 
 > **참고:** `<REPOSITORY_URL>`을 실제 Git 저장소 URL로 교체하세요.
 >
-> 예: `git clone https://github.com/yourusername/challenger-bot-mk2.git`
+> 예: `git clone https://github.com/redcornu/challenger-bot-mk2.git`
 
 ### 4.2 가상환경 생성 및 의존성 설치
+
+> **⚠️ 중요: 이 단계는 필수입니다!**
+> 가상환경이 없으면 systemd 서비스가 시작되지 않습니다.
+> 반드시 아래 명령어를 순서대로 실행하세요.
 
 ```bash
 python3 -m venv venv
@@ -164,6 +168,30 @@ pip install -r requirements.txt
 ```
 
 설치 과정은 3-5분 소요됩니다.
+
+**✅ 가상환경 생성 확인:**
+
+다음 명령어로 가상환경이 제대로 생성되었는지 확인하세요:
+
+```bash
+ls -la venv/bin/python*
+```
+
+**정상 출력 예시:**
+```
+-rwxr-xr-x 1 ubuntu ubuntu ... venv/bin/python
+lrwxrwxrwx 1 ubuntu ubuntu ... venv/bin/python -> python3
+-rwxr-xr-x 1 ubuntu ubuntu ... venv/bin/python3
+```
+
+`python` 실행 파일이 존재하고 `python3`로 심볼릭 링크되어 있어야 합니다.
+
+만약 `python` 파일이 없고 `python3`만 있다면 다음 명령어를 실행하세요:
+```bash
+cd venv/bin/
+ln -s python3 python
+cd ../..
+```
 
 ### 4.3 .env 파일 생성
 
@@ -229,6 +257,14 @@ Systemd를 사용하면 다음과 같은 이점이 있습니다:
 - 봇이 크래시되면 자동으로 재시작
 - 로그 관리가 용이
 - 서비스 상태 모니터링 간편
+
+> **⚠️ 사전 확인:**
+> systemd 서비스를 설치하기 전에 반드시 가상환경이 생성되었는지 확인하세요:
+> ```bash
+> ls -la /home/ubuntu/challenger-bot-mk2/venv/bin/python
+> ```
+> 
+> 파일이 존재하지 않으면 [4.2단계](#42-가상환경-생성-및-의존성-설치)로 돌아가 가상환경을 생성하세요.
 
 ### 5.1 Discord 봇 서비스 설치
 
@@ -615,29 +651,99 @@ chown -R ubuntu:ubuntu /home/ubuntu/challenger-bot-mk2
 Job for challenger-bot.service failed
 ```
 
+또는
+
+```
+Failed to locate executable /home/ubuntu/challenger-bot-mk2/venv/bin/python: No such file or directory
+```
+
 **해결 방법:**
 
-1. 상세 로그 확인:
-   ```bash
-   sudo journalctl -u challenger-bot -n 50 --no-pager
-   ```
+**Step 1: 상세 로그 확인**
+```bash
+sudo journalctl -u challenger-bot -n 50 --no-pager
+```
 
-2. 서비스 파일 검증:
-   ```bash
-   sudo systemctl cat challenger-bot
-   ```
+**Step 2: 가상환경 존재 여부 확인**
 
-3. 수동으로 실행하여 오류 확인:
-   ```bash
-   cd /home/ubuntu/challenger-bot-mk2
-   source venv/bin/activate
-   python src/main.py
-   ```
+가장 흔한 원인은 가상환경이 생성되지 않은 것입니다:
 
-4. 일반적인 원인:
-   - 환경변수 미설정 → `.env` 파일 확인
-   - 경로 오류 → 서비스 파일의 `WorkingDirectory` 확인
-   - Python 의존성 누락 → `pip install -r requirements.txt` 재실행
+```bash
+# venv 디렉토리 확인
+ls -la /home/ubuntu/challenger-bot-mk2/venv/
+
+# Python 실행 파일 확인
+ls -la /home/ubuntu/challenger-bot-mk2/venv/bin/python*
+```
+
+**Case A: venv 디렉토리가 없는 경우** (가장 흔함)
+
+```bash
+cd /home/ubuntu/challenger-bot-mk2
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 서비스 재시작
+sudo systemctl restart challenger-bot
+sudo systemctl restart challenger-flask
+```
+
+**Case B: venv는 있지만 python 실행 파일이 python3로만 존재**
+
+```bash
+# 확인
+ls -la /home/ubuntu/challenger-bot-mk2/venv/bin/
+
+# python3만 있고 python이 없다면 심볼릭 링크 생성
+cd /home/ubuntu/challenger-bot-mk2/venv/bin/
+ln -s python3 python
+cd ../..
+
+# 또는 systemd 서비스 파일 수정
+sudo nano /etc/systemd/system/challenger-bot.service
+# ExecStart=/home/ubuntu/challenger-bot-mk2/venv/bin/python src/main.py
+# 위 줄을 아래로 변경:
+# ExecStart=/home/ubuntu/challenger-bot-mk2/venv/bin/python3 src/main.py
+
+sudo nano /etc/systemd/system/challenger-flask.service
+# 같은 방식으로 python → python3 변경
+
+# systemd 재로드 및 재시작
+sudo systemctl daemon-reload
+sudo systemctl restart challenger-bot
+sudo systemctl restart challenger-flask
+```
+
+**Step 3: 서비스 파일 검증**
+```bash
+sudo systemctl cat challenger-bot
+```
+
+`ExecStart` 경로가 올바른지 확인:
+- WorkingDirectory: `/home/ubuntu/challenger-bot-mk2`
+- ExecStart: `/home/ubuntu/challenger-bot-mk2/venv/bin/python` (또는 `python3`)
+
+**Step 4: 수동 실행으로 오류 확인**
+```bash
+cd /home/ubuntu/challenger-bot-mk2
+source venv/bin/activate
+python src/main.py
+```
+
+**Step 5: 서비스 상태 확인**
+```bash
+sudo systemctl status challenger-bot
+```
+
+**일반적인 원인:**
+- ❌ 가상환경 미생성 → [4.2단계](#42-가상환경-생성-및-의존성-설치) 참고
+- ❌ python 실행 파일 이름 불일치 → 심볼릭 링크 생성 또는 서비스 파일 수정
+- ❌ 환경변수 미설정 → `.env` 파일 확인
+- ❌ 경로 오류 → 서비스 파일의 `WorkingDirectory` 확인
+- ❌ Python 의존성 누락 → `pip install -r requirements.txt` 재실행
+- ❌ 권한 문제 → `chown -R ubuntu:ubuntu /home/ubuntu/challenger-bot-mk2`
 
 ### 10.6 데이터베이스 오류
 
