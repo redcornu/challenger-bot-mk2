@@ -41,7 +41,7 @@ echo ""
 # 4. Git 업데이트
 echo -e "${YELLOW}3️⃣ Git에서 최신 코드 가져오는 중...${NC}"
 git stash  # 로컬 변경사항 임시 저장
-git pull origin main
+git pull origin master
 echo -e "${GREEN}✅ 코드 업데이트 완료${NC}"
 echo ""
 
