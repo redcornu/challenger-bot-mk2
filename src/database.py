@@ -1,8 +1,11 @@
 import sqlite3
 import json
+import logging
 from contextlib import contextmanager
 from typing import Optional, Dict, List
 from config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 @contextmanager
 def get_db_connection():
@@ -117,8 +120,11 @@ def update_challenge(thread_id: int, state: str = None, streak: int = None,
             params.append(thread_id)
             query = f"UPDATE duck_challenge SET {', '.join(updates)} WHERE thread_id = ?"
             c.execute(query, params)
+            if c.rowcount == 0:
+                logger.warning(f"Update affected 0 rows for challenge {thread_id}")
             return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to update challenge {thread_id}: {type(e).__name__}: {e}")
         return False
 
 def get_user(user_id: int) -> Optional[Dict]:
@@ -139,8 +145,12 @@ def create_user(user_id: int, username: str) -> bool:
                 VALUES (?, ?, 0, 0, '{}')
             ''', (user_id, username))
             return True
-    except sqlite3.IntegrityError:
-        return False  # 이미 존재하는 유저
+    except sqlite3.IntegrityError as e:
+        logger.debug(f"User {user_id} already exists (expected): {e}")
+        return False  # 이미 존재하는 유저 (정상)
+    except Exception as e:
+        logger.error(f"Failed to create user {user_id}: {type(e).__name__}: {e}")
+        return False
 
 def update_user_inventory(user_id: int, gold: int, inventory: str) -> bool:
     """유저 골드 및 인벤토리 업데이트"""
@@ -151,8 +161,11 @@ def update_user_inventory(user_id: int, gold: int, inventory: str) -> bool:
                 UPDATE users SET gold = ?, inventory = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
             ''', (gold, inventory, user_id))
+            if c.rowcount == 0:
+                logger.warning(f"Update affected 0 rows for user {user_id}")
             return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to update user {user_id} inventory: {type(e).__name__}: {e}")
         return False
 
 def get_user_total_auth_days(user_id: int) -> int:
@@ -222,6 +235,9 @@ def update_challenge_admin(thread_id: int, state: str = None,
             params.append(thread_id)
             query = f"UPDATE duck_challenge SET {', '.join(updates)} WHERE thread_id = ?"
             c.execute(query, params)
+            if c.rowcount == 0:
+                logger.warning(f"Admin update affected 0 rows for challenge {thread_id}")
             return c.rowcount > 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to admin update challenge {thread_id}: {type(e).__name__}: {e}")
         return False

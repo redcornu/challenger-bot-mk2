@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
+import logging
 from config import BotStates, BotConfig, MESSAGE_DELETE_AFTER, IMAGE_PATHS, STATE_KOREAN
-from database import get_challenge, create_challenge, update_challenge, get_user, create_user
+from database import get_challenge, create_challenge, update_challenge, get_user, create_user, update_user_inventory
 from config import EMBED_COLORS
 from utils.validators import get_kst_now
 from utils.embed_builder import EmbedBuilder
@@ -11,6 +12,7 @@ class ChallengeCog(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.logger = logging.getLogger(__name__)
 
     @commands.command(name='목표설정')
     async def set_goal(self, ctx, *, goal: str):
@@ -37,7 +39,16 @@ class ChallengeCog(commands.Cog):
         # 유저 생성 (없으면)
         user = get_user(ctx.author.id)
         if not user:
-            create_user(ctx.author.id, ctx.author.name)
+            success = create_user(ctx.author.id, ctx.author.name)
+            if not success:
+                # Race condition 가능성: 다른 프로세스가 먼저 생성했을 수 있음
+                user = get_user(ctx.author.id)
+                if not user:
+                    # 여전히 없으면 심각한 에러
+                    self.logger.error(f"[Critical] 유저 생성/조회 실패: {ctx.author.id}")
+                    embed = EmbedBuilder.error("오류", "유저 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
+                    await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+                    return
 
         # 도전 생성
         success = create_challenge(ctx.channel.id, ctx.author.id, goal)
@@ -64,6 +75,9 @@ class ChallengeCog(commands.Cog):
     @commands.command(name='인증')
     async def authenticate(self, ctx):
         """일일 인증 (사진 필수)"""
+        # 중복 실행 추적을 위한 로그
+        self.logger.info(f"[인증 시작] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 메시지 ID: {ctx.message.id}")
+        
         # 사진 첨부 확인
         if not ctx.message.attachments:
             embed = EmbedBuilder.error(
@@ -89,7 +103,9 @@ class ChallengeCog(commands.Cog):
 
         # 중복 인증 방지
         today = get_kst_now().date().isoformat()
+        self.logger.info(f"[중복 인증 체크] 사용자: {ctx.author.id}, 오늘: {today}, 마지막 인증: {challenge['last_auth_date']}")
         if challenge['last_auth_date'] == today:
+            self.logger.warning(f"[중복 인증 차단] 사용자: {ctx.author.id}가 오늘 이미 인증함")
             embed = EmbedBuilder.error(
                 "이미 인증 완료",
                 "오늘은 이미 인증하셨습니다!"
@@ -209,15 +225,32 @@ class ChallengeCog(commands.Cog):
             new_total += 1
 
         # DB 업데이트
+        self.logger.info(f"[인증 DB 업데이트 시작] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 상태: {new_state}, 연속: {new_streak}일")
         update_challenge(ctx.channel.id, state=new_state, streak=new_streak,
                          growth_days=new_growth, total_days=new_total, last_auth_date=today)
+        self.logger.info(f"[인증 DB 업데이트 완료] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}")
 
         # 골드 지급 (정상 상태일 때만)
         if new_state not in [BotStates.SULKY, BotStates.RUNAWAY]:
             user = get_user(ctx.author.id)
+            if not user:
+                # 이 시점에서 유저가 없으면 심각한 문제
+                self.logger.error(f"[Critical] 골드 지급 실패: 유저 {ctx.author.id} 찾을 수 없음")
+                # 복구 시도
+                create_user(ctx.author.id, ctx.author.name)
+                user = get_user(ctx.author.id)
+
             if user:
                 from utils.validators import safe_json_loads, safe_json_dumps
-                update_user_inventory(ctx.author.id, user['gold'] + BotConfig.DAILY_GOLD_REWARD, user['inventory'])
+                old_gold = user['gold']
+                new_gold = old_gold + BotConfig.DAILY_GOLD_REWARD
+                self.logger.info(f"[골드 지급] 사용자: {ctx.author.id}, 기존: {old_gold}G -> 신규: {new_gold}G")
+
+                success = update_user_inventory(ctx.author.id, new_gold, user['inventory'])
+                if not success:
+                    self.logger.error(f"[Error] 골드 업데이트 실패: 유저 {ctx.author.id}")
+            else:
+                self.logger.error(f"[Critical] 골드 지급 완전 실패: 유저 {ctx.author.id}")
 
         # 결과 메시지
         if new_state in [BotStates.SULKY, BotStates.RUNAWAY]:
@@ -230,6 +263,7 @@ class ChallengeCog(commands.Cog):
             status_text + message_extra
         )
         await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+        self.logger.info(f"[인증 완료] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 메시지 ID: {ctx.message.id}")
 
     @commands.command(name='상태')
     async def status(self, ctx):
