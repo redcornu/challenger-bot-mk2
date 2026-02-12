@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import os
 import sys
+import logging
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -10,6 +11,8 @@ from config import BotStates, STATE_KOREAN
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key')
+
+logger = logging.getLogger(__name__)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
