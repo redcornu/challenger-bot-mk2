@@ -5,7 +5,7 @@
     const modal = document.getElementById('edit-modal');
     const modalContent = document.getElementById('modal-body');
     const closeBtn = document.querySelector('.modal-close');
-    let currentUserId = null;
+    let currentUserId = null; // string: 64비트 user_id를 문자열로 처리
 
     // 모달 열기
     async function openModal(userId) {
@@ -204,7 +204,7 @@
 
         rows.forEach(row => {
             const userIdCell = row.querySelector('td:first-child');
-            if (userIdCell && parseInt(userIdCell.textContent) === userData.user_id) {
+            if (userIdCell && userIdCell.textContent === String(userData.user_id)) {
                 // 골드 업데이트
                 const goldCell = row.querySelector('td:nth-child(4)');
                 if (goldCell) {
@@ -226,7 +226,7 @@
         const editButtons = document.querySelectorAll('.btn-edit');
         editButtons.forEach(button => {
             button.addEventListener('click', function() {
-                const userId = parseInt(this.getAttribute('data-user-id'));
+                const userId = this.getAttribute('data-user-id'); // 문자열로 유지
                 openModal(userId);
             });
         });

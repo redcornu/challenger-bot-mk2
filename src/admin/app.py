@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from werkzeug.routing import BaseConverter
 import os
 import sys
 import logging
@@ -9,10 +10,25 @@ from database import get_db_connection, get_user_challenges, update_challenge_ad
 from admin.auth import login_required, verify_password
 from config import BotStates, STATE_KOREAN
 
+class BigIntConverter(BaseConverter):
+    """64비트 정수를 처리하는 커스텀 URL 컨버터 (Discord user_id 등)"""
+    regex = r'\d+'
+
+    def to_python(self, value):
+        """URL에서 Python 객체로 변환"""
+        return int(value)
+
+    def to_url(self, value):
+        """Python 객체에서 URL로 변환"""
+        return str(value)
+
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key')
 
 logger = logging.getLogger(__name__)
+
+# 커스텀 URL 컨버터 등록
+app.url_map.converters['bigint'] = BigIntConverter
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -75,7 +91,7 @@ def users_list():
         users = [dict(row) for row in c.fetchall()]
     return render_template('users.html', users=users, search=search)
 
-@app.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
+@app.route('/users/<bigint:user_id>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_user(user_id):
     """유저 정보 수정"""
@@ -157,7 +173,7 @@ def edit_user(user_id):
                          state_options=state_options,
                          state_korean=STATE_KOREAN)
 
-@app.route('/api/users/<int:user_id>', methods=['GET'])
+@app.route('/api/users/<bigint:user_id>', methods=['GET'])
 @login_required
 def api_get_user(user_id):
     """API: 유저 정보 조회 (모달용)"""
@@ -213,7 +229,7 @@ def api_get_user(user_id):
     except Exception as e:
         return jsonify({'success': False, 'message': f'오류가 발생했습니다: {str(e)}'}), 500
 
-@app.route('/api/users/<int:user_id>/update', methods=['POST'])
+@app.route('/api/users/<bigint:user_id>/update', methods=['POST'])
 @login_required
 def api_update_user(user_id):
     """API: 유저 정보 업데이트 (모달용)"""

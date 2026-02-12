@@ -4,7 +4,7 @@ import logging
 from config import BotStates, BotConfig, MESSAGE_DELETE_AFTER, IMAGE_PATHS, STATE_KOREAN
 from database import get_challenge, create_challenge, update_challenge, get_user, create_user, update_user_inventory
 from config import EMBED_COLORS
-from utils.validators import get_kst_now
+from utils.validators import get_kst_now, safe_json_loads, safe_json_dumps
 from utils.embed_builder import EmbedBuilder
 
 class ChallengeCog(commands.Cog):
@@ -241,7 +241,6 @@ class ChallengeCog(commands.Cog):
                 user = get_user(ctx.author.id)
 
             if user:
-                from utils.validators import safe_json_loads, safe_json_dumps
                 old_gold = user['gold']
                 new_gold = old_gold + BotConfig.DAILY_GOLD_REWARD
                 self.logger.info(f"[골드 지급] 사용자: {ctx.author.id}, 기존: {old_gold}G -> 신규: {new_gold}G")
@@ -298,7 +297,6 @@ class ChallengeCog(commands.Cog):
 
         # 내 정보 + 인벤토리
         if user:
-            from utils.validators import safe_json_loads
             from cogs.shop import SHOP_ITEMS
 
             inventory = safe_json_loads(user['inventory'])
