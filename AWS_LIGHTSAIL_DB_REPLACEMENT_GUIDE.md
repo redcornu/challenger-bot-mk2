@@ -90,7 +90,7 @@ ssh -i ~/Downloads/challenger-duck.pem ubuntu@3.39.110.88
 **로컬 터미널에서 실행:**
 
 ```bash
-cd /Users/mac/Documents/자료/요진편/challenger-bot-mk2
+cd /users/mac/Documents/자료/요진편/challenger-bot-mk2
 ```
 
 #### 2.1.1 `prepare_db_replacement_server.sh` 생성
