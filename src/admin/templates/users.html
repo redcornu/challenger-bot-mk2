@@ -25,14 +25,27 @@
     </thead>
     <tbody>
         {% for user in users %}
-        <tr>
-            <td>{{ user.user_id }}</td>
-            <td>{{ user.username or '(없음)' }}</td>
-            <td>🎓 {{ user.ducks_raised }}</td>
-            <td>💰 {{ user.gold }}G</td>
-            <td>{{ user.created_at[:10] }}</td>
+        <tr data-user-id="{{ user.user_id }}">
+            <td class="read-only">{{ user.user_id }}</td>
+            <td class="read-only">{{ user.username or '(없음)' }}</td>
+            <td class="editable-cell"
+                data-field="ducks_raised"
+                data-value="{{ user.ducks_raised }}"
+                data-emoji="🎓">
+                <span class="cell-content">🎓 {{ user.ducks_raised }}</span>
+                <span class="edit-icon">✎</span>
+            </td>
+            <td class="editable-cell"
+                data-field="gold"
+                data-value="{{ user.gold }}"
+                data-emoji="💰"
+                data-suffix="G">
+                <span class="cell-content">💰 {{ user.gold }}G</span>
+                <span class="edit-icon">✎</span>
+            </td>
+            <td class="read-only">{{ user.created_at[:10] }}</td>
             <td>
-                <button class="btn btn-sm btn-edit" data-user-id="{{ user.user_id }}">수정</button>
+                <button class="btn btn-sm btn-advanced" data-user-id="{{ user.user_id }}">고급 설정</button>
             </td>
         </tr>
         {% else %}
