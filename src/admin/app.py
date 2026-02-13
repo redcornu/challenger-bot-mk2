@@ -227,13 +227,15 @@ def api_get_user(user_id):
         return jsonify({
             'success': True,
             'user': {
-                'user_id': user['user_id'],
+                # JS Number 정밀도 이슈 방지: Discord snowflake는 문자열로 전달
+                'user_id': str(user['user_id']),
                 'username': user['username'],
                 'gold': user['gold'],
                 'ducks_raised': user['ducks_raised']
             },
             'challenge': {
-                'thread_id': active_challenge['thread_id'],
+                # JS Number 정밀도 이슈 방지
+                'thread_id': str(active_challenge['thread_id']),
                 'state': active_challenge['state'],
                 'streak': active_challenge['streak'],
                 'total_days': active_challenge['total_days'],
@@ -325,7 +327,8 @@ def api_update_user(user_id):
             'success': True,
             'message': '유저 정보가 업데이트되었습니다.',
             'updated_user': {
-                'user_id': updated_user['user_id'],
+                # JS Number 정밀도 이슈 방지
+                'user_id': str(updated_user['user_id']),
                 'username': updated_user['username'],
                 'gold': updated_user['gold'],
                 'ducks_raised': updated_user['ducks_raised']
