@@ -1,7 +1,10 @@
 from functools import wraps
 from flask import session, redirect, url_for, flash
 from werkzeug.security import check_password_hash, generate_password_hash
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 admin_password = os.getenv('ADMIN_PASSWORD')
 if not admin_password or admin_password in {'admin1234', 'your_secure_password_here'}:

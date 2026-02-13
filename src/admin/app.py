@@ -1,8 +1,11 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from werkzeug.routing import BaseConverter
+from dotenv import load_dotenv
 import os
 import sys
 import logging
+
+load_dotenv()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
