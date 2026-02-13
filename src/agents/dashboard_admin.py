@@ -14,6 +14,7 @@ import requests
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
+from config import env_to_bool
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class DashboardAdminAgent:
         self.bot = bot
         self.monitoring_channel_id = monitoring_channel_id
         self.flask_pid_file = Path('.flask.pid')
+        self.manage_flask_lifecycle = env_to_bool('MANAGE_FLASK_LIFECYCLE', False)
         
         # 모니터링 상태
         self.consecutive_failures = 0
@@ -127,19 +129,18 @@ class DashboardAdminAgent:
         
         # 1. PID 확인
         pid = self.get_flask_pid()
+        process_info = None
         if not pid:
-            logger.warning("Flask 서버 PID 파일이 없습니다.")
-            self.total_failures += 1
-            return False
-        
-        # 2. 프로세스 확인
-        process_info = self.get_process_info(pid)
-        if not process_info or not process_info['running']:
-            logger.warning(f"Flask 서버 프로세스가 실행 중이지 않습니다 (PID: {pid}).")
-            self.total_failures += 1
-            return False
-        
-        # 3. HTTP 응답 확인
+            logger.info("Flask 서버 PID 파일이 없습니다. HTTP 기반 외부 프로세스 상태를 확인합니다.")
+        else:
+            # 2. 프로세스 확인
+            process_info = self.get_process_info(pid)
+            if not process_info or not process_info['running']:
+                logger.warning(f"Flask 서버 프로세스가 실행 중이지 않습니다 (PID: {pid}).")
+                self.total_failures += 1
+                return False
+
+        # 3. HTTP 응답 확인 (PID 유무와 무관)
         success, status_code, response_time = self.check_http_response()
         if not success:
             logger.warning("Flask 서버가 HTTP 응답하지 않습니다.")
@@ -155,7 +156,7 @@ class DashboardAdminAgent:
         
         # 4. 리소스 경고
         channel = await self.get_monitoring_channel()
-        if channel:
+        if channel and process_info:
             if process_info['cpu'] > 80:
                 await self.send_warning(
                     channel,
@@ -181,6 +182,10 @@ class DashboardAdminAgent:
     
     async def auto_restart(self) -> bool:
         """Flask 서버 자동 재시작"""
+        if not self.manage_flask_lifecycle:
+            logger.warning("MANAGE_FLASK_LIFECYCLE=False: 자동 재시작을 건너뜁니다.")
+            return False
+
         logger.info("Flask 서버 자동 재시작 시도 중...")
         
         from hooks import flask_lifecycle

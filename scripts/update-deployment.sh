@@ -19,6 +19,13 @@ if [ ! -f "src/main.py" ]; then
     exit 1
 fi
 
+# 로컬 변경사항 확인 (서비스 중지 전에 검사)
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo -e "${RED}❌ 로컬 변경사항이 있습니다. 자동 stash는 수행하지 않습니다.${NC}"
+    echo "   수동으로 커밋/백업 후 다시 실행하세요."
+    exit 1
+fi
+
 # 2. 서비스 중지
 echo -e "${YELLOW}1️⃣ 서비스 중지 중...${NC}"
 sudo systemctl stop challenger-bot
@@ -40,8 +47,7 @@ echo ""
 
 # 4. Git 업데이트
 echo -e "${YELLOW}3️⃣ Git에서 최신 코드 가져오는 중...${NC}"
-git stash  # 로컬 변경사항 임시 저장
-git pull origin master
+git pull --ff-only origin master
 echo -e "${GREEN}✅ 코드 업데이트 완료${NC}"
 echo ""
 

@@ -1,8 +1,8 @@
 import discord
 from discord.ext import commands
 import logging
-from config import BotStates, BotConfig, MESSAGE_DELETE_AFTER, IMAGE_PATHS, STATE_KOREAN
-from database import get_challenge, create_challenge, update_challenge, get_user, create_user, update_user_inventory
+from config import BotStates, BotConfig, MESSAGE_DELETE_AFTER, IMAGE_PATHS, STATE_KOREAN, normalize_state
+from database import get_challenge, create_challenge, update_challenge, get_user, create_user, update_user_inventory, upsert_user_profile
 from config import EMBED_COLORS
 from utils.validators import get_kst_now, safe_json_loads, safe_json_dumps
 from utils.embed_builder import EmbedBuilder
@@ -14,9 +14,14 @@ class ChallengeCog(commands.Cog):
         self.bot = bot
         self.logger = logging.getLogger(__name__)
 
+    def _author_display_name(self, author) -> str:
+        return getattr(author, 'display_name', None) or author.name
+
     @commands.command(name='목표설정')
     async def set_goal(self, ctx, *, goal: str):
         """새로운 도전 시작"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         # 스레드 검증
         if not isinstance(ctx.channel, discord.Thread):
             embed = EmbedBuilder.error(
@@ -39,7 +44,7 @@ class ChallengeCog(commands.Cog):
         # 유저 생성 (없으면)
         user = get_user(ctx.author.id)
         if not user:
-            success = create_user(ctx.author.id, ctx.author.name)
+            success = create_user(ctx.author.id, self._author_display_name(ctx.author))
             if not success:
                 # Race condition 가능성: 다른 프로세스가 먼저 생성했을 수 있음
                 user = get_user(ctx.author.id)
@@ -75,6 +80,8 @@ class ChallengeCog(commands.Cog):
     @commands.command(name='인증')
     async def authenticate(self, ctx):
         """일일 인증 (사진 필수)"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         # 중복 실행 추적을 위한 로그
         self.logger.info(f"[인증 시작] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 메시지 ID: {ctx.message.id}")
 
@@ -116,7 +123,21 @@ class ChallengeCog(commands.Cog):
         # 페널티 및 인증 처리 로직
         from datetime import datetime
         
-        current_state = challenge['state']
+        current_state = normalize_state(challenge['state'])
+        if current_state != challenge['state']:
+            update_challenge(ctx.channel.id, state=current_state)
+            challenge['state'] = current_state
+
+        valid_states = {
+            BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
+            BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
+        }
+        if current_state not in valid_states:
+            self.logger.warning(f"알 수 없는 상태값 감지: {current_state}, EGG로 복구합니다.")
+            current_state = BotStates.EGG
+            update_challenge(ctx.channel.id, state=current_state)
+            challenge['state'] = current_state
+
         new_state = current_state
         new_streak = challenge['streak']
         new_growth = challenge['growth_days']
@@ -237,7 +258,7 @@ class ChallengeCog(commands.Cog):
                 # 이 시점에서 유저가 없으면 심각한 문제
                 self.logger.error(f"[Critical] 골드 지급 실패: 유저 {ctx.author.id} 찾을 수 없음")
                 # 복구 시도
-                create_user(ctx.author.id, ctx.author.name)
+                create_user(ctx.author.id, self._author_display_name(ctx.author))
                 user = get_user(ctx.author.id)
 
             if user:
@@ -267,11 +288,19 @@ class ChallengeCog(commands.Cog):
     @commands.command(name='상태')
     async def status(self, ctx):
         """현재 오리 상태 및 인벤토리 확인"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         challenge = get_challenge(ctx.channel.id)
         if not challenge:
             embed = EmbedBuilder.error("도전 없음", "먼저 !목표설정으로 도전을 시작하세요.")
             await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return
+
+        # 레거시 상태(DUCK) 호환
+        normalized_state = normalize_state(challenge['state'])
+        if normalized_state != challenge['state']:
+            update_challenge(ctx.channel.id, state=normalized_state)
+            challenge['state'] = normalized_state
 
         user = get_user(ctx.author.id)
 
@@ -359,11 +388,11 @@ class ChallengeCog(commands.Cog):
 
     async def _check_ownership(self, ctx, challenge) -> bool:
         """소유권 확인 헬퍼"""
-        thread_owner = ctx.channel.owner_id
-        if ctx.author.id != thread_owner:
+        challenge_owner = challenge.get('user_id') or ctx.channel.owner_id
+        if ctx.author.id != challenge_owner:
             embed = EmbedBuilder.error(
                 "권한 없음",
-                "이 도전의 주인만 인증할 수 있습니다."
+                "이 도전의 생성자만 인증할 수 있습니다."
             )
             await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return False

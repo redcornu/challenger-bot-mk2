@@ -196,6 +196,7 @@ def migrate_challenges(skip_threads=None):
                 growth_days = ch['sulky_days']
             except (KeyError, IndexError):
                 growth_days = 0
+            state = 'DUCKLING' if ch['state'] == 'DUCK' else ch['state']
 
             nc.execute('''
                 INSERT INTO duck_challenge (
@@ -208,7 +209,7 @@ def migrate_challenges(skip_threads=None):
                 ch['thread_id'],
                 ch['user_id'],
                 ch['goal_text'],
-                ch['state'],
+                state,
                 ch['streak'],
                 growth_days,
                 ch['total_days'],

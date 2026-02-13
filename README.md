@@ -50,6 +50,7 @@ FLASK_SECRET_KEY=your-random-secret-key-here
 # Flask 서버 설정 (macOS AirPlay Receiver가 5000번 포트를 사용하므로 5001 사용)
 FLASK_HOST=0.0.0.0
 FLASK_PORT=5001
+MANAGE_FLASK_LIFECYCLE=False  # systemd 운영 환경 권장값
 
 # Flask 모니터링 (선택)
 MONITORING_CHANNEL_ID=0  # 0으로 설정하면 비활성화
@@ -86,7 +87,7 @@ MONITORING_CHANNEL_ID=0  # 0으로 설정하면 비활성화
 #### 방법 2: 수동 실행
 
 ```bash
-# Discord 봇 (Flask 서버 자동 시작됨)
+# Discord 봇
 python src/main.py
 ```
 
@@ -145,13 +146,13 @@ python src/admin/app.py
 - 📈 **정확한 추적**: 총 인증일(total_days)이 정확하게 기록됩니다
 - 🏆 **공정한 랭킹**: 졸업 오리 수 → 총 인증일 → 골드 순으로 정렬
 - ⏰ **자동 랭킹**: 설정 시 매 시간마다 랭킹이 자동으로 게시됩니다
-- 🤖 **자동화 시스템**: Flask 서버 자동 시작/중지, 헬스 체크, 자동 복구
+- 🤖 **자동화 시스템**: (옵션) Flask 자동 시작/중지, 헬스 체크, 자동 복구
 
 ## 자동화 기능 (NEW!)
 
-### Hook: Flask 서버 생명주기 관리
-- Discord 봇 시작 시 Flask 서버 자동 시작
-- 봇 종료 시 Flask 서버 안전하게 종료
+### Hook: Flask 서버 생명주기 관리 (옵션)
+- `MANAGE_FLASK_LIFECYCLE=True`일 때 Discord 봇 시작 시 Flask 서버 자동 시작
+- `MANAGE_FLASK_LIFECYCLE=True`일 때 봇 종료 시 Flask 서버 안전하게 종료
 - 의존성 및 환경 변수 자동 검증
 
 ### Skill: Discord 명령어로 서버 제어

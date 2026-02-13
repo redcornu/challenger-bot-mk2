@@ -91,7 +91,7 @@ def start_flask_server():
         logger.error("❌ 환경 변수가 올바르게 설정되지 않았습니다. .env 파일 확인 필요.")
         return False
     
-    # 3. 이미 실행 중인지 확인
+    # 3. PID 파일 기준 실행 중인지 확인
     if flask_pid_file.exists():
         try:
             with open(flask_pid_file, 'r') as f:
@@ -103,11 +103,16 @@ def start_flask_server():
         except (OSError, ValueError):
             # 프로세스가 존재하지 않으면 PID 파일 삭제
             flask_pid_file.unlink()
+
+    # 4. 외부(systemd 등)에서 이미 실행 중인 경우 중복 실행 방지
+    if health_check(retries=1, delay=0):
+        logger.info("ℹ️ Flask 서버가 이미 응답 중입니다. (외부 프로세스 관리로 판단, 시작 건너뜀)")
+        return True
     
-    # 4. 로그 디렉토리 생성
+    # 5. 로그 디렉토리 생성
     os.makedirs('logs', exist_ok=True)
     
-    # 5. Flask 서버 시작
+    # 6. Flask 서버 시작
     try:
         flask_app_path = os.path.join(os.path.dirname(__file__), '..', 'admin', 'app.py')
         flask_app_path = os.path.abspath(flask_app_path)
@@ -126,7 +131,7 @@ def start_flask_server():
         
         logger.info(f"🚀 Flask 서버 시작됨 (PID: {flask_process.pid})")
         
-        # 6. 헬스 체크
+        # 7. 헬스 체크
         time.sleep(2)  # 초기 시작 대기
         port = os.getenv('FLASK_PORT', '5001')
         if health_check():
@@ -180,6 +185,10 @@ def stop_flask_server():
             logger.error(f"❌ Flask 서버 종료 실패: {e}")
             return False
     else:
+        # PID 파일이 없으면 외부 프로세스일 수 있으므로 종료를 시도하지 않음
+        if health_check(retries=1, delay=0):
+            logger.info("ℹ️ Flask 서버는 응답 중이지만 PID 파일이 없습니다. (외부 관리로 판단, 종료 건너뜀)")
+            return True
         logger.warning("⚠️  Flask 서버 PID 파일이 없습니다.")
         return False
 

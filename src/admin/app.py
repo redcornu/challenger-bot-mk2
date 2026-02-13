@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from database import get_db_connection, get_user_challenges, update_challenge_admin
 from admin.auth import login_required, verify_password
-from config import BotStates, STATE_KOREAN
+from config import BotStates, STATE_KOREAN, VALID_STATES, normalize_state, env_to_bool
 
 class BigIntConverter(BaseConverter):
     """64비트 정수를 처리하는 커스텀 URL 컨버터 (Discord user_id 등)"""
@@ -23,7 +23,13 @@ class BigIntConverter(BaseConverter):
         return str(value)
 
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key')
+flask_secret_key = os.getenv('FLASK_SECRET_KEY')
+if not flask_secret_key or flask_secret_key == 'your-random-secret-key-here':
+    raise RuntimeError("FLASK_SECRET_KEY가 안전한 값으로 설정되어야 합니다.")
+app.secret_key = flask_secret_key
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = env_to_bool('SESSION_COOKIE_SECURE', False)
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +119,7 @@ def edit_user(user_id):
         if challenge_id:
             # 상태 값 검증
             state = request.form.get('state')
-            valid_states = [
-                BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
-                BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
-            ]
-            if state not in valid_states:
+            if state not in VALID_STATES:
                 flash(f'유효하지 않은 상태값: {state}', 'error')
                 return redirect(url_for('edit_user', user_id=user_id))
             
@@ -155,6 +157,11 @@ def edit_user(user_id):
     # 활성 도전 조회 (가장 최근 것)
     challenges = get_user_challenges(user_id)
     active_challenge = challenges[0] if challenges else None
+    if active_challenge:
+        normalized_state = normalize_state(active_challenge['state'])
+        if normalized_state != active_challenge['state']:
+            update_challenge_admin(thread_id=active_challenge['thread_id'], state=normalized_state)
+            active_challenge['state'] = normalized_state
     
     # 상태 선택 옵션
     state_options = [
@@ -197,6 +204,11 @@ def api_get_user(user_id):
         # 활성 도전 조회
         challenges = get_user_challenges(user_id)
         active_challenge = challenges[0] if challenges else None
+        if active_challenge:
+            normalized_state = normalize_state(active_challenge['state'])
+            if normalized_state != active_challenge['state']:
+                update_challenge_admin(thread_id=active_challenge['thread_id'], state=normalized_state)
+                active_challenge['state'] = normalized_state
 
         # 상태 선택 옵션
         state_options = [
@@ -235,6 +247,8 @@ def api_update_user(user_id):
     """API: 유저 정보 업데이트 (모달용)"""
     try:
         data = request.get_json()
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'message': '요청 본문(JSON)이 올바르지 않습니다.'}), 400
         logger.info(f"[API] 유저 업데이트 요청: user_id={user_id}")
         logger.info(f"[API] 업데이트 데이터: {data}")
 
@@ -269,11 +283,7 @@ def api_update_user(user_id):
             state = data.get('state')
 
             # 상태 값 검증
-            valid_states = [
-                BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
-                BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
-            ]
-            if state not in valid_states:
+            if state not in VALID_STATES:
                 return jsonify({
                     'success': False,
                     'message': f'유효하지 않은 상태값: {state}'

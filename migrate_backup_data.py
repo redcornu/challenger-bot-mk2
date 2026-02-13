@@ -143,6 +143,7 @@ def migrate_data(skip_duplicates=True):
             try:
                 # sulky_days -> growth_days로 변환
                 growth_days = challenge['sulky_days'] if 'sulky_days' in challenge.keys() else 0
+                state = 'DUCKLING' if challenge['state'] == 'DUCK' else challenge['state']
 
                 current_cursor.execute('''
                     INSERT INTO duck_challenge
@@ -152,7 +153,7 @@ def migrate_data(skip_duplicates=True):
                     challenge['thread_id'],
                     challenge['user_id'],
                     challenge['goal_text'],
-                    challenge['state'],
+                    state,
                     challenge['streak'],
                     growth_days,
                     challenge['total_days'],

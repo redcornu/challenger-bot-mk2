@@ -13,6 +13,9 @@ NC='\033[0m' # No Color
 # .env에서 Flask 포트 읽기
 FLASK_PORT=$(grep -E '^FLASK_PORT=' .env 2>/dev/null | cut -d '=' -f2)
 FLASK_PORT=${FLASK_PORT:-5001}  # 기본값 5001
+MANAGE_FLASK_LIFECYCLE=$(grep -E '^MANAGE_FLASK_LIFECYCLE=' .env 2>/dev/null | cut -d '=' -f2)
+MANAGE_FLASK_LIFECYCLE=${MANAGE_FLASK_LIFECYCLE:-False}
+MANAGE_FLASK_LIFECYCLE_NORMALIZED=$(echo "$MANAGE_FLASK_LIFECYCLE" | tr '[:upper:]' '[:lower:]')
 
 echo "🚀 서버 시작 중..."
 echo ""
@@ -87,12 +90,19 @@ echo -e "${GREEN}✅ Discord 봇 시작됨 (PID: $DISCORD_PID)${NC}"
 echo ""
 
 # Flask 서버 시작
-echo "7️⃣  Flask 서버 시작..."
-nohup python src/admin/app.py > logs/flask.log 2>&1 &
-FLASK_PID=$!
-echo $FLASK_PID > .flask.pid
-echo -e "${GREEN}✅ Flask 서버 시작됨 (PID: $FLASK_PID)${NC}"
-echo ""
+if [[ "$MANAGE_FLASK_LIFECYCLE_NORMALIZED" == "true" ]]; then
+    echo "7️⃣  Flask 서버 시작..."
+    echo -e "${YELLOW}⚠️  MANAGE_FLASK_LIFECYCLE=True: Discord 봇이 Flask를 자동 관리합니다.${NC}"
+    echo -e "${YELLOW}   별도 Flask 프로세스는 시작하지 않습니다.${NC}"
+    echo ""
+else
+    echo "7️⃣  Flask 서버 시작..."
+    nohup python src/admin/app.py > logs/flask.log 2>&1 &
+    FLASK_PID=$!
+    echo $FLASK_PID > .flask.pid
+    echo -e "${GREEN}✅ Flask 서버 시작됨 (PID: $FLASK_PID)${NC}"
+    echo ""
+fi
 
 # 헬스 체크
 echo "8️⃣  헬스 체크..."
@@ -107,16 +117,13 @@ else
 fi
 
 # Flask 서버 확인
-if ps -p $FLASK_PID > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Flask 서버 실행 중${NC}"
-    
-    # HTTP 응답 확인 (최대 5회 재시도)
-    for i in {1..5}; do
+if [[ "$MANAGE_FLASK_LIFECYCLE_NORMALIZED" == "true" ]]; then
+    for i in {1..8}; do
         if curl -s http://localhost:${FLASK_PORT} > /dev/null 2>&1; then
-            echo -e "${GREEN}✅ Flask 서버 HTTP 응답 확인됨${NC}"
+            echo -e "${GREEN}✅ Flask 서버 HTTP 응답 확인됨 (봇 자동관리)${NC}"
             break
         else
-            if [ $i -eq 5 ]; then
+            if [ $i -eq 8 ]; then
                 echo -e "${YELLOW}⚠️  Flask 서버가 아직 준비되지 않았습니다. 잠시 후 다시 시도하세요.${NC}"
             else
                 sleep 1
@@ -124,8 +131,26 @@ if ps -p $FLASK_PID > /dev/null 2>&1; then
         fi
     done
 else
-    echo -e "${RED}❌ Flask 서버가 시작 직후 종료되었습니다.${NC}"
-    echo "   로그 확인: tail -f logs/flask.log"
+    if ps -p $FLASK_PID > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ Flask 서버 실행 중${NC}"
+        
+        # HTTP 응답 확인 (최대 5회 재시도)
+        for i in {1..5}; do
+            if curl -s http://localhost:${FLASK_PORT} > /dev/null 2>&1; then
+                echo -e "${GREEN}✅ Flask 서버 HTTP 응답 확인됨${NC}"
+                break
+            else
+                if [ $i -eq 5 ]; then
+                    echo -e "${YELLOW}⚠️  Flask 서버가 아직 준비되지 않았습니다. 잠시 후 다시 시도하세요.${NC}"
+                else
+                    sleep 1
+                fi
+            fi
+        done
+    else
+        echo -e "${RED}❌ Flask 서버가 시작 직후 종료되었습니다.${NC}"
+        echo "   로그 확인: tail -f logs/flask.log"
+    fi
 fi
 
 echo ""

@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 # 환경변수 로드
 load_dotenv()
 
+
+def env_to_bool(name: str, default: bool = False) -> bool:
+    """환경변수를 bool로 파싱"""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
 # Discord 설정
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 if not DISCORD_TOKEN:
@@ -15,6 +23,7 @@ DB_PATH = os.getenv('DB_PATH', 'data/bot.db')
 # Flask 서버 설정
 FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
 FLASK_PORT = int(os.getenv('FLASK_PORT', '5001'))
+MANAGE_FLASK_LIFECYCLE = env_to_bool('MANAGE_FLASK_LIFECYCLE', False)
 
 # 봇 설정
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'False').lower() == 'true'
@@ -32,9 +41,34 @@ class BotStates:
     RUNAWAY = "RUNAWAY"
     DONE = "DONE"
 
+
+LEGACY_STATE_ALIASES = {
+    # 구버전 DB 호환
+    "DUCK": BotStates.DUCKLING,
+}
+
+
+def normalize_state(state):
+    """상태값 정규화 (구버전 별칭 -> 최신 상태)"""
+    if state is None:
+        return None
+    return LEGACY_STATE_ALIASES.get(state, state)
+
+
+VALID_STATES = {
+    BotStates.EGG,
+    BotStates.DUCKLING,
+    BotStates.ADOLESCENT,
+    BotStates.ADULT,
+    BotStates.SULKY,
+    BotStates.RUNAWAY,
+    BotStates.DONE,
+}
+
 # 한글 번역
 STATE_KOREAN = {
     BotStates.EGG: "오리알",
+    "DUCK": "병아리 오리",
     BotStates.DUCKLING: "병아리 오리",
     BotStates.ADOLESCENT: "사춘기 오리",
     BotStates.ADULT: "어른 오리",

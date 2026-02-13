@@ -149,7 +149,7 @@ SELECT '총 골드', SUM(gold) FROM users
 UNION ALL
 SELECT 'EGG 상태', COUNT(*) FROM duck_challenge WHERE state = 'EGG'
 UNION ALL
-SELECT 'DUCK 상태', COUNT(*) FROM duck_challenge WHERE state = 'DUCK';
+SELECT 'DUCKLING 상태', COUNT(*) FROM duck_challenge WHERE state = 'DUCKLING';
 SQL
 
 # 4. Orphaned challenges 확인
@@ -707,7 +707,7 @@ chmod +x scripts/prepare_db_replacement_server.sh
 챌린지 수    52
 총 골드    2340
 EGG 상태    15
-DUCK 상태   37
+DUCKLING 상태   37
 
 Orphaned Challenges 확인:
 ⚠️  2 개의 orphaned challenges 발견

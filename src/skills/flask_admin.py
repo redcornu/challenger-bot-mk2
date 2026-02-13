@@ -91,6 +91,10 @@ class FlaskAdmin(commands.Cog):
         if not self.is_admin(ctx):
             await ctx.send("❌ 관리자 권한이 필요합니다.", delete_after=10)
             return
+
+        if self.check_http_response():
+            await ctx.send(f"⚠️ Flask 서버가 이미 응답 중입니다.\n🌐 {self.get_flask_url()}")
+            return
         
         pid = self.get_flask_pid()
         if pid and self.get_process_info(pid):
@@ -117,7 +121,10 @@ class FlaskAdmin(commands.Cog):
         
         pid = self.get_flask_pid()
         if not pid:
-            await ctx.send("⚠️ Flask 서버가 실행 중이지 않습니다.")
+            if self.check_http_response():
+                await ctx.send("⚠️ Flask 서버가 외부 프로세스로 실행 중입니다. (PID 파일 없음)\n수동/systemd로 중지하세요.")
+            else:
+                await ctx.send("⚠️ Flask 서버가 실행 중이지 않습니다.")
             return
         
         await ctx.send("🛑 Flask 서버 중지 중...")
@@ -142,8 +149,12 @@ class FlaskAdmin(commands.Cog):
         
         from hooks import flask_lifecycle
         
-        # 서버 중지
         pid = self.get_flask_pid()
+        if not pid and self.check_http_response():
+            await ctx.send("⚠️ Flask 서버가 외부 프로세스로 실행 중입니다. (PID 파일 없음)\n수동/systemd로 재시작하세요.")
+            return
+
+        # 서버 중지
         if pid:
             flask_lifecycle.stop_flask_server()
             await ctx.send("✅ 서버 중지 완료")
@@ -169,8 +180,19 @@ class FlaskAdmin(commands.Cog):
         embed = discord.Embed(title="🌐 Flask 서버 상태", color=discord.Color.blue())
         
         if not pid:
-            embed.color = discord.Color.red()
-            embed.add_field(name="상태", value="❌ 중지됨", inline=False)
+            http_status = self.check_http_response()
+            if http_status:
+                embed.color = discord.Color.gold()
+                embed.add_field(name="상태", value="⚠️ 실행 중 (외부 프로세스)", inline=False)
+                embed.add_field(name="PID", value="추적 불가 (.flask.pid 없음)", inline=False)
+                embed.add_field(
+                    name="접속 링크",
+                    value=f"[{self.get_flask_url()}]({self.get_flask_url()})",
+                    inline=False
+                )
+            else:
+                embed.color = discord.Color.red()
+                embed.add_field(name="상태", value="❌ 중지됨", inline=False)
             await ctx.send(embed=embed)
             return
         

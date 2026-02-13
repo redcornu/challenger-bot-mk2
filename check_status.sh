@@ -48,7 +48,12 @@ if [ -f ".discord_bot.pid" ]; then
         rm .discord_bot.pid
     fi
 else
-    echo -e "   상태: ${RED}중지됨${NC}"
+    if curl -s -o /dev/null -w "%{http_code}" http://localhost:${FLASK_PORT} | grep -q "200\\|302"; then
+        echo -e "   상태: ${YELLOW}실행 중 (외부 프로세스)${NC}"
+        echo "   URL: http://localhost:${FLASK_PORT}"
+    else
+        echo -e "   상태: ${RED}중지됨${NC}"
+    fi
 fi
 
 echo ""

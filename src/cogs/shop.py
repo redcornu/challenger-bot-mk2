@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from config import MESSAGE_DELETE_AFTER
-from database import get_user, update_user_inventory
+from database import get_user, update_user_inventory, upsert_user_profile
 from utils.embed_builder import EmbedBuilder
 from utils.validators import safe_json_loads, safe_json_dumps
 
@@ -16,9 +16,14 @@ class ShopCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    def _author_display_name(self, author) -> str:
+        return getattr(author, 'display_name', None) or author.name
+
     @commands.command(name='상점')
     async def shop(self, ctx):
         """상점 아이템 목록"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         embed = discord.Embed(
             title="🏪 상점",
             description="아이템을 구매하려면 !구매 [아이템명]",
@@ -37,6 +42,8 @@ class ShopCog(commands.Cog):
     @commands.command(name='구매')
     async def buy(self, ctx, *, item_name: str):
         """아이템 구매"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         if item_name not in SHOP_ITEMS:
             embed = EmbedBuilder.error(
                 "아이템 없음",
@@ -79,6 +86,8 @@ class ShopCog(commands.Cog):
     @commands.command(name='인벤토리')
     async def inventory(self, ctx):
         """인벤토리는 !상태 명령어에 통합되었습니다"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         embed = EmbedBuilder.info(
             "인벤토리 확인",
             "인벤토리는 이제 **!상태** 명령어에서 확인할 수 있습니다!\n도전 스레드에서 !상태를 사용해보세요."
@@ -88,6 +97,8 @@ class ShopCog(commands.Cog):
     @commands.command(name='사용')
     async def use_item(self, ctx, *, item_name: str):
         """아이템 사용"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
         if item_name not in SHOP_ITEMS:
             embed = EmbedBuilder.error(
                 "아이템 없음",
@@ -118,8 +129,9 @@ class ShopCog(commands.Cog):
             await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return
 
-        # 소유권 확인
-        if ctx.author.id != ctx.channel.owner_id:
+        # 소유권 확인 (스레드 소유자 아님, 도전 생성자 기준)
+        challenge_owner = challenge.get('user_id') or ctx.channel.owner_id
+        if ctx.author.id != challenge_owner:
             embed = EmbedBuilder.error(
                 "권한 없음",
                 "이 도전의 주인만 아이템을 사용할 수 있습니다."

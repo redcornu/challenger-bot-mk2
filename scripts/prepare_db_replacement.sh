@@ -44,7 +44,7 @@ SELECT '총 골드', SUM(gold) FROM users
 UNION ALL
 SELECT 'EGG 상태', COUNT(*) FROM duck_challenge WHERE state = 'EGG'
 UNION ALL
-SELECT 'DUCK 상태', COUNT(*) FROM duck_challenge WHERE state = 'DUCK';
+SELECT 'DUCKLING 상태', COUNT(*) FROM duck_challenge WHERE state = 'DUCKLING';
 EOF
 
 # 4. Orphaned challenges 확인

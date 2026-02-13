@@ -3,7 +3,7 @@ import json
 import logging
 from contextlib import contextmanager
 from typing import Optional, Dict, List, Any
-from config import DB_PATH
+from config import DB_PATH, normalize_state
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +67,29 @@ def init_db():
         c.execute('CREATE INDEX IF NOT EXISTS idx_state ON duck_challenge(state)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_ranking ON users(ducks_raised DESC, gold DESC)')
 
+        # 레거시 상태값 정규화 (DUCK -> DUCKLING)
+        c.execute("UPDATE duck_challenge SET state = 'DUCKLING' WHERE state = 'DUCK'")
+        if c.rowcount > 0:
+            logger.info(f"레거시 상태값 정규화 완료: {c.rowcount}건 (DUCK -> DUCKLING)")
+
 def get_challenge(thread_id: int) -> Optional[Dict]:
     """도전 정보 조회"""
     with get_db_connection() as conn:
         c = conn.cursor()
         c.execute("SELECT * FROM duck_challenge WHERE thread_id = ?", (thread_id,))
         row = c.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+
+        challenge = dict(row)
+        normalized_state = normalize_state(challenge['state'])
+        if normalized_state != challenge['state']:
+            challenge['state'] = normalized_state
+            c.execute(
+                "UPDATE duck_challenge SET state = ? WHERE thread_id = ?",
+                (normalized_state, challenge['thread_id'])
+            )
+        return challenge
 
 def create_challenge(thread_id: int, user_id: int, goal_text: str) -> bool:
     """새로운 도전 생성"""
@@ -152,6 +168,50 @@ def create_user(user_id: int, username: str) -> bool:
         logger.error(f"Failed to create user {user_id}: {type(e).__name__}: {e}")
         return False
 
+
+def upsert_user_profile(user_id: int, username: Optional[str]) -> bool:
+    """유저 프로필 동기화 (없으면 생성, 있으면 username 갱신)"""
+    try:
+        normalized_username = (username or "").strip()
+        if not normalized_username:
+            normalized_username = None
+
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute(
+                '''
+                INSERT INTO users (user_id, username, ducks_raised, gold, inventory)
+                VALUES (?, ?, 0, 0, '{}')
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = excluded.username,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE excluded.username IS NOT NULL
+                  AND excluded.username <> ''
+                  AND (users.username IS NULL OR users.username <> excluded.username)
+                ''',
+                (user_id, normalized_username)
+            )
+            return True
+    except Exception as e:
+        logger.error(f"Failed to upsert user profile {user_id}: {type(e).__name__}: {e}")
+        return False
+
+
+def get_user_ids_missing_username(limit: int = 500) -> List[int]:
+    """username이 비어있는 유저 ID 목록 조회"""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            '''
+            SELECT user_id
+            FROM users
+            WHERE username IS NULL OR TRIM(username) = ''
+            LIMIT ?
+            ''',
+            (limit,)
+        )
+        return [row['user_id'] for row in c.fetchall()]
+
 def update_user_inventory(user_id: int, gold: int, inventory: str) -> bool:
     """유저 골드 및 인벤토리 업데이트"""
     try:
@@ -208,7 +268,16 @@ def get_user_challenges(user_id: int) -> List[Dict]:
             WHERE user_id = ? 
             ORDER BY created_at DESC
         ''', (user_id,))
-        return [dict(row) for row in c.fetchall()]
+        challenges = [dict(row) for row in c.fetchall()]
+        for challenge in challenges:
+            normalized_state = normalize_state(challenge['state'])
+            if normalized_state != challenge['state']:
+                challenge['state'] = normalized_state
+                c.execute(
+                    "UPDATE duck_challenge SET state = ? WHERE thread_id = ?",
+                    (normalized_state, challenge['thread_id'])
+                )
+        return challenges
 
 def update_challenge_admin(thread_id: int, state: str = None, 
                            streak: int = None, total_days: int = None) -> bool:
