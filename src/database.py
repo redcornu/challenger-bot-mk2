@@ -285,28 +285,49 @@ def update_challenge_admin(thread_id: int, state: str = None,
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
+
+            # 대상 도전 존재 여부 확인
+            c.execute(
+                "SELECT state, streak, total_days FROM duck_challenge WHERE thread_id = ?",
+                (thread_id,)
+            )
+            existing = c.fetchone()
+            if not existing:
+                logger.warning(f"Admin update failed: challenge {thread_id} not found")
+                return False
+
+            current_state = existing['state']
+            current_streak = existing['streak']
+            current_total_days = existing['total_days']
+
             updates = []
             params = []
 
             if state is not None:
-                updates.append("state = ?")
-                params.append(state)
+                normalized_state = normalize_state(state)
+                if normalized_state != current_state:
+                    updates.append("state = ?")
+                    params.append(normalized_state)
             if streak is not None:
-                updates.append("streak = ?")
-                params.append(streak)
+                if streak != current_streak:
+                    updates.append("streak = ?")
+                    params.append(streak)
             if total_days is not None:
-                updates.append("total_days = ?")
-                params.append(total_days)
+                if total_days != current_total_days:
+                    updates.append("total_days = ?")
+                    params.append(total_days)
 
             if not updates:
-                return False
+                # 변경사항이 없으면 성공으로 간주
+                return True
 
             params.append(thread_id)
             query = f"UPDATE duck_challenge SET {', '.join(updates)} WHERE thread_id = ?"
             c.execute(query, params)
-            if c.rowcount == 0:
+            if c.rowcount <= 0:
                 logger.warning(f"Admin update affected 0 rows for challenge {thread_id}")
-            return c.rowcount > 0
+                return False
+            return True
     except Exception as e:
         logger.error(f"Failed to admin update challenge {thread_id}: {type(e).__name__}: {e}")
         return False
