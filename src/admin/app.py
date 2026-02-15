@@ -127,17 +127,19 @@ def edit_user(user_id):
                 return redirect(url_for('edit_user', user_id=user_id))
             
             streak = int(request.form.get('streak', 0))
+            growth_days = int(request.form.get('growth_days', 0))
             total_days = int(request.form.get('total_days', 0))
             
             # 음수 검증
-            if streak < 0 or total_days < 0:
-                flash('연속 일수와 총 일수는 0 이상이어야 합니다.', 'error')
+            if streak < 0 or growth_days < 0 or total_days < 0:
+                flash('연속 일수, 성장일, 총 일수는 0 이상이어야 합니다.', 'error')
                 return redirect(url_for('edit_user', user_id=user_id))
             
             success = update_challenge_admin(
                 thread_id=int(challenge_id),
                 state=state,
                 streak=streak,
+                growth_days=growth_days,
                 total_days=total_days
             )
             
@@ -238,6 +240,7 @@ def api_get_user(user_id):
                 'thread_id': str(active_challenge['thread_id']),
                 'state': active_challenge['state'],
                 'streak': active_challenge['streak'],
+                'growth_days': active_challenge['growth_days'],
                 'total_days': active_challenge['total_days'],
                 'goal_text': active_challenge['goal_text']
             } if active_challenge else None,
@@ -295,19 +298,21 @@ def api_update_user(user_id):
                 }), 400
 
             streak = int(data.get('streak', 0))
+            growth_days = int(data.get('growth_days', 0))
             total_days = int(data.get('total_days', 0))
 
             # 음수 검증
-            if streak < 0 or total_days < 0:
+            if streak < 0 or growth_days < 0 or total_days < 0:
                 return jsonify({
                     'success': False,
-                    'message': '연속 일수와 총 일수는 0 이상이어야 합니다.'
+                    'message': '연속 일수, 성장일, 총 일수는 0 이상이어야 합니다.'
                 }), 400
 
             success = update_challenge_admin(
                 thread_id=int(challenge_id),
                 state=state,
                 streak=streak,
+                growth_days=growth_days,
                 total_days=total_days
             )
 

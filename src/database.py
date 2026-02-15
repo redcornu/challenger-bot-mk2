@@ -305,8 +305,9 @@ def get_user_challenges(user_id: int) -> List[Dict]:
                 )
         return challenges
 
-def update_challenge_admin(thread_id: int, state: str = None, 
-                           streak: int = None, total_days: int = None) -> bool:
+def update_challenge_admin(thread_id: int, state: str = None,
+                           streak: int = None, growth_days: int = None,
+                           total_days: int = None) -> bool:
     """관리자용 도전 정보 업데이트 (검증 없이)"""
     try:
         with get_db_connection() as conn:
@@ -314,7 +315,7 @@ def update_challenge_admin(thread_id: int, state: str = None,
 
             # 대상 도전 존재 여부 확인
             c.execute(
-                "SELECT state, streak, total_days FROM duck_challenge WHERE thread_id = ?",
+                "SELECT state, streak, growth_days, total_days FROM duck_challenge WHERE thread_id = ?",
                 (thread_id,)
             )
             existing = c.fetchone()
@@ -324,6 +325,7 @@ def update_challenge_admin(thread_id: int, state: str = None,
 
             current_state = existing['state']
             current_streak = existing['streak']
+            current_growth_days = existing['growth_days']
             current_total_days = existing['total_days']
 
             updates = []
@@ -338,6 +340,10 @@ def update_challenge_admin(thread_id: int, state: str = None,
                 if streak != current_streak:
                     updates.append("streak = ?")
                     params.append(streak)
+            if growth_days is not None:
+                if growth_days != current_growth_days:
+                    updates.append("growth_days = ?")
+                    params.append(growth_days)
             if total_days is not None:
                 if total_days != current_total_days:
                     updates.append("total_days = ?")

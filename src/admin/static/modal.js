@@ -120,6 +120,11 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="growth_days">성장일 🌱</label>
+                    <input type="number" id="growth_days" name="growth_days" value="${challenge.growth_days ?? 0}" min="0" required>
+                </div>
+
+                <div class="form-group">
                     <label for="total_days">총 일수 📅</label>
                     <input type="number" id="total_days" name="total_days" value="${challenge.total_days}" min="0" required>
                 </div>
@@ -164,6 +169,7 @@
             formData.challenge_id = challengeIdInput.value;
             formData.state = document.getElementById('state').value;
             formData.streak = parseInt(document.getElementById('streak').value);
+            formData.growth_days = parseInt(document.getElementById('growth_days').value);
             formData.total_days = parseInt(document.getElementById('total_days').value);
         }
 
