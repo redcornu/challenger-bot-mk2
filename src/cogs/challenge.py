@@ -387,6 +387,10 @@ class ChallengeCog(commands.Cog):
             embed = EmbedBuilder.error("입력 오류", "일차는 0 이상이어야 합니다.")
             await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return
+        if new_growth_days > 20:
+            embed = EmbedBuilder.error("입력 오류", "수정 가능한 최대 일차는 20일차입니다.")
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            return
 
         old_growth_days = challenge['growth_days']
         old_state = normalize_state(challenge['state'])
@@ -452,7 +456,7 @@ class ChallengeCog(commands.Cog):
 `!상점`: 구매 가능한 아이템을 확인합니다.
 `!구매 [아이템]`: 아이템을 구매합니다.
 `!사용 [아이템]`: 아이템을 사용합니다.
-`!수정 [일차]`: 성장일을 수정합니다. (예: `!수정 10일차`)
+`!수정 [일차]`: 성장일을 수정합니다. (최대 20일차, 예: `!수정 10일차`)
 `!가이드`: 이 도움말을 다시 봅니다."""
 
         embed = discord.Embed(
