@@ -220,12 +220,24 @@ main {
     border-radius: 4px;
 }
 
+.users-help {
+    margin-bottom: 1rem;
+    color: #4b5563;
+    font-size: 0.95rem;
+}
+
 /* Table */
+.table-scroll {
+    overflow-x: auto;
+    border-radius: 8px;
+}
+
 .user-table {
-    width: 100%;
+    min-width: 1380px;
     background: white;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-collapse: collapse;
     overflow: hidden;
 }
 
@@ -236,8 +248,9 @@ main {
 
 .user-table th,
 .user-table td {
-    padding: 1rem;
+    padding: 0.75rem 0.8rem;
     text-align: left;
+    border-bottom: 1px solid #e5e7eb;
 }
 
 .user-table tbody tr:nth-child(even) {
@@ -246,6 +259,64 @@ main {
 
 .user-table tbody tr:hover {
     background: #e8f4f8;
+}
+
+.user-table th.sortable {
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    padding-right: 1.6rem;
+}
+
+.user-table th.sortable::after {
+    content: "↕";
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.8rem;
+    opacity: 0.7;
+}
+
+.user-table th.sortable.sort-asc::after {
+    content: "↑";
+    opacity: 1;
+}
+
+.user-table th.sortable.sort-desc::after {
+    content: "↓";
+    opacity: 1;
+}
+
+.goal-cell {
+    max-width: 300px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.state-cell {
+    min-width: 150px;
+}
+
+.state-select {
+    width: 100%;
+    min-width: 130px;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 0.9rem;
+}
+
+.state-select:disabled {
+    background: #f1f5f9;
+    cursor: not-allowed;
+}
+
+.read-only-placeholder {
+    color: #9ca3af;
 }
 
 .text-center {
@@ -519,6 +590,35 @@ main {
 }
 
 .editable-cell.error {
+    animation: error-flash 0.8s ease;
+    background: #f8d7da;
+}
+
+.state-cell.saving {
+    position: relative;
+    opacity: 0.75;
+    pointer-events: none;
+}
+
+.state-cell.saving::after {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    top: 50%;
+    right: 0.5rem;
+    margin-top: -8px;
+    border: 2px solid #3498db;
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spinner 0.6s linear infinite;
+}
+
+.state-cell.success {
+    animation: success-flash 0.8s ease;
+}
+
+.state-cell.error {
     animation: error-flash 0.8s ease;
     background: #f8d7da;
 }

@@ -4,6 +4,10 @@
 
 {% block content %}
 <h2>👥 유저 관리</h2>
+<p class="users-help">
+    숫자 칸은 <strong>더블클릭</strong>으로 바로 수정됩니다. 상태는 드롭다운 변경 시 즉시 저장됩니다.
+    컬럼 제목 클릭으로 오름차순/내림차순 정렬할 수 있습니다.
+</p>
 
 <div class="search-box">
     <form method="GET">
@@ -12,56 +16,112 @@
     </form>
 </div>
 
-<table class="user-table">
-    <thead>
-        <tr>
-            <th>유저 ID</th>
-            <th>유저명</th>
-            <th>졸업 오리</th>
-            <th>골드</th>
-            <th>생성일</th>
-            <th>작업</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for user in users %}
-        <tr data-user-id="{{ user.user_id }}">
-            <td class="read-only">{{ user.user_id }}</td>
-            <td class="read-only">{{ user.username or '(없음)' }}</td>
-            <td class="editable-cell"
-                data-field="ducks_raised"
-                data-value="{{ user.ducks_raised }}"
-                data-emoji="🎓">
-                <span class="cell-content">🎓 {{ user.ducks_raised }}</span>
-                <span class="edit-icon">✎</span>
-            </td>
-            <td class="editable-cell"
-                data-field="gold"
-                data-value="{{ user.gold }}"
-                data-emoji="💰"
-                data-suffix="G">
-                <span class="cell-content">💰 {{ user.gold }}G</span>
-                <span class="edit-icon">✎</span>
-            </td>
-            <td class="read-only">{{ user.created_at[:10] }}</td>
-            <td>
-                <button class="btn btn-sm btn-advanced" data-user-id="{{ user.user_id }}">고급 설정</button>
-            </td>
-        </tr>
-        {% else %}
-        <tr>
-            <td colspan="6" class="text-center">유저가 없습니다.</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="table-scroll">
+    <table class="user-table">
+        <thead>
+            <tr>
+                <th class="sortable" data-key="user_id" data-type="number">유저 ID</th>
+                <th class="sortable" data-key="username" data-type="text">유저명</th>
+                <th class="sortable" data-key="goal_text" data-type="text">최신 도전 목표</th>
+                <th class="sortable" data-key="state" data-type="text">오리 상태</th>
+                <th class="sortable" data-key="streak" data-type="number">연속</th>
+                <th class="sortable" data-key="growth_days" data-type="number">성장일</th>
+                <th class="sortable" data-key="total_days" data-type="number">총 인증일</th>
+                <th class="sortable" data-key="ducks_raised" data-type="number">졸업 오리</th>
+                <th class="sortable" data-key="gold" data-type="number">골드</th>
+                <th class="sortable" data-key="last_auth_date" data-type="date">마지막 인증</th>
+                <th class="sortable" data-key="created_at" data-type="date">가입일</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr data-user-id="{{ user.user_id }}" data-challenge-id="{{ user.challenge_id or '' }}">
+                <td class="read-only" data-key="user_id" data-sort-value="{{ user.user_id }}">{{ user.user_id }}</td>
+                <td class="read-only" data-key="username" data-sort-value="{{ (user.username or '')|lower }}">{{ user.username or '(없음)' }}</td>
+                <td class="read-only goal-cell" data-key="goal_text" data-sort-value="{{ (user.goal_text or '')|lower }}">{{ user.goal_text or '(도전 없음)' }}</td>
 
-<!-- 편집 모달 -->
-<div id="edit-modal" class="modal">
-    <div class="modal-content">
-        <span class="modal-close">&times;</span>
-        <h3>유저 정보 수정</h3>
-        <div id="modal-body"></div>
-    </div>
+                <td class="state-cell" data-key="state" data-sort-value="{{ user.state or '' }}">
+                    {% if user.challenge_id %}
+                    <select class="state-select" data-prev-value="{{ user.state }}">
+                        {% for value, label in state_options %}
+                        <option value="{{ value }}" {% if user.state == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <span class="read-only-placeholder">-</span>
+                    {% endif %}
+                </td>
+
+                {% if user.challenge_id %}
+                <td class="editable-cell"
+                    data-key="streak"
+                    data-sort-value="{{ user.streak }}"
+                    data-field="streak"
+                    data-value="{{ user.streak }}"
+                    data-emoji="🔥">
+                    <span class="cell-content">🔥 {{ user.streak }}</span>
+                    <span class="edit-icon">✎</span>
+                </td>
+                <td class="editable-cell"
+                    data-key="growth_days"
+                    data-sort-value="{{ user.growth_days }}"
+                    data-field="growth_days"
+                    data-value="{{ user.growth_days }}"
+                    data-emoji="🌱">
+                    <span class="cell-content">🌱 {{ user.growth_days }}</span>
+                    <span class="edit-icon">✎</span>
+                </td>
+                <td class="editable-cell"
+                    data-key="total_days"
+                    data-sort-value="{{ user.total_days }}"
+                    data-field="total_days"
+                    data-value="{{ user.total_days }}"
+                    data-emoji="📅">
+                    <span class="cell-content">📅 {{ user.total_days }}</span>
+                    <span class="edit-icon">✎</span>
+                </td>
+                {% else %}
+                <td class="read-only" data-key="streak" data-sort-value="-1">-</td>
+                <td class="read-only" data-key="growth_days" data-sort-value="-1">-</td>
+                <td class="read-only" data-key="total_days" data-sort-value="-1">-</td>
+                {% endif %}
+
+                <td class="editable-cell"
+                    data-key="ducks_raised"
+                    data-sort-value="{{ user.ducks_raised }}"
+                    data-field="ducks_raised"
+                    data-value="{{ user.ducks_raised }}"
+                    data-emoji="🎓">
+                    <span class="cell-content">🎓 {{ user.ducks_raised }}</span>
+                    <span class="edit-icon">✎</span>
+                </td>
+
+                <td class="editable-cell"
+                    data-key="gold"
+                    data-sort-value="{{ user.gold }}"
+                    data-field="gold"
+                    data-value="{{ user.gold }}"
+                    data-emoji="💰"
+                    data-suffix="G">
+                    <span class="cell-content">💰 {{ user.gold }}G</span>
+                    <span class="edit-icon">✎</span>
+                </td>
+
+                <td class="read-only" data-key="last_auth_date" data-sort-value="{{ user.last_auth_date or '' }}">
+                    {{ user.last_auth_date or '-' }}
+                </td>
+                <td class="read-only" data-key="created_at" data-sort-value="{{ user.created_at or '' }}">
+                    {{ user.created_at[:10] if user.created_at else '-' }}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="11" class="text-center">유저가 없습니다.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 {% endblock %}

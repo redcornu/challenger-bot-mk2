@@ -91,14 +91,75 @@ def users_list():
         c = conn.cursor()
         if search:
             c.execute('''
-                SELECT * FROM users
-                WHERE username LIKE ? OR CAST(user_id AS TEXT) LIKE ?
+                SELECT
+                    u.*,
+                    dc.thread_id as challenge_id,
+                    dc.goal_text as goal_text,
+                    dc.state as state,
+                    dc.streak as streak,
+                    dc.growth_days as growth_days,
+                    dc.total_days as total_days,
+                    dc.last_auth_date as last_auth_date
+                FROM users u
+                LEFT JOIN duck_challenge dc
+                    ON dc.thread_id = (
+                        SELECT dc2.thread_id
+                        FROM duck_challenge dc2
+                        WHERE dc2.user_id = u.user_id
+                        ORDER BY dc2.created_at DESC, dc2.thread_id DESC
+                        LIMIT 1
+                    )
+                WHERE u.username LIKE ? OR CAST(u.user_id AS TEXT) LIKE ?
                 ORDER BY ducks_raised DESC
             ''', (f'%{search}%', f'%{search}%'))
         else:
-            c.execute('SELECT * FROM users ORDER BY ducks_raised DESC')
+            c.execute('''
+                SELECT
+                    u.*,
+                    dc.thread_id as challenge_id,
+                    dc.goal_text as goal_text,
+                    dc.state as state,
+                    dc.streak as streak,
+                    dc.growth_days as growth_days,
+                    dc.total_days as total_days,
+                    dc.last_auth_date as last_auth_date
+                FROM users u
+                LEFT JOIN duck_challenge dc
+                    ON dc.thread_id = (
+                        SELECT dc2.thread_id
+                        FROM duck_challenge dc2
+                        WHERE dc2.user_id = u.user_id
+                        ORDER BY dc2.created_at DESC, dc2.thread_id DESC
+                        LIMIT 1
+                    )
+                ORDER BY ducks_raised DESC
+            ''')
         users = [dict(row) for row in c.fetchall()]
-    return render_template('users.html', users=users, search=search)
+    for user in users:
+        challenge_id = user.get('challenge_id')
+        if challenge_id and user.get('state'):
+            normalized_state = normalize_state(user['state'])
+            if normalized_state != user['state']:
+                update_challenge_admin(thread_id=int(challenge_id), state=normalized_state)
+                user['state'] = normalized_state
+
+    state_options = [
+        ('EGG', STATE_KOREAN[BotStates.EGG]),
+        ('DUCKLING', STATE_KOREAN[BotStates.DUCKLING]),
+        ('ADOLESCENT', STATE_KOREAN[BotStates.ADOLESCENT]),
+        ('ADULT', STATE_KOREAN[BotStates.ADULT]),
+        ('SULKY', STATE_KOREAN[BotStates.SULKY]),
+        ('RUNAWAY', STATE_KOREAN[BotStates.RUNAWAY]),
+        ('DONE', STATE_KOREAN[BotStates.DONE]),
+    ]
+
+    return render_template(
+        'users.html',
+        users=users,
+        search=search,
+        state_options=state_options,
+        state_korean=STATE_KOREAN
+    )
 
 @app.route('/users/<bigint:user_id>/edit', methods=['GET', 'POST'])
 @login_required

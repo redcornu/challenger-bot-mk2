@@ -1,536 +1,462 @@
-// 모달 및 인라인 편집 기능
-(function() {
+// 유저 목록 인라인 편집 + 컬럼 정렬
+(function () {
     'use strict';
 
-    const modal = document.getElementById('edit-modal');
-    const modalContent = document.getElementById('modal-body');
-    const closeBtn = document.querySelector('.modal-close');
-    let currentUserId = null; // string: 64비트 user_id를 문자열로 처리
-
-    // ==================== 인라인 편집 상태 관리 ====================
-    let currentEditingCell = null;
-    let originalValue = null;
-
-    // 모달 열기
-    async function openModal(userId) {
-        currentUserId = userId;
-        modal.classList.add('active');
-        showLoading();
-
-        try {
-            const response = await fetch(`/api/users/${userId}`);
-            const data = await response.json();
-
-            if (!data.success) {
-                const errorMsg = data.message || '유저 정보를 불러올 수 없습니다.';
-                console.error('[Modal] API 오류:', errorMsg, '(user_id:', userId, ')');
-                showError(`${errorMsg} (user_id: ${userId})`);
-                return;
-            }
-
-            renderForm(data);
-        } catch (error) {
-            showError('유저 정보를 불러오는 중 오류가 발생했습니다.');
-            console.error('Error:', error);
-        }
-    }
-
-    // 모달 닫기
-    function closeModal() {
-        modal.classList.remove('active');
-        currentUserId = null;
-        modalContent.innerHTML = '';
-    }
-
-    // 로딩 표시
-    function showLoading() {
-        modalContent.innerHTML = '<div class="modal-loading">데이터를 불러오는 중...</div>';
-    }
-
-    // 에러 표시
-    function showError(message) {
-        modalContent.innerHTML = `<div class="modal-error">${message}</div>`;
-    }
-
-    // 성공 메시지 표시
-    function showSuccess(message) {
-        const successDiv = document.createElement('div');
-        successDiv.className = 'modal-success';
-        successDiv.textContent = message;
-        modalContent.insertBefore(successDiv, modalContent.firstChild);
-
-        setTimeout(() => {
-            successDiv.remove();
-        }, 3000);
-    }
-
-    // 폼 렌더링
-    function renderForm(data) {
-        const { user, challenge, state_options } = data;
-
-        let formHTML = `
-            <form id="edit-form">
-                <div class="form-group">
-                    <label>유저 ID</label>
-                    <input type="text" value="${user.user_id}" disabled>
-                </div>
-
-                <div class="form-group">
-                    <label>유저명</label>
-                    <input type="text" value="${user.username || '(없음)'}" disabled>
-                </div>
-
-                <div class="form-group">
-                    <label for="gold">골드 💰</label>
-                    <input type="number" id="gold" name="gold" value="${user.gold}" min="0" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="ducks_raised">졸업 오리 🎓</label>
-                    <input type="number" id="ducks_raised" name="ducks_raised" value="${user.ducks_raised}" min="0" required>
-                </div>
-
-                <div class="challenge-section">
-                    <h4>🦆 활성 도전</h4>
-        `;
-
-        if (challenge) {
-            formHTML += `
-                <input type="hidden" id="challenge_id" value="${challenge.thread_id}">
-
-                <div class="form-group">
-                    <label>목표</label>
-                    <input type="text" value="${challenge.goal_text}" disabled>
-                </div>
-
-                <div class="form-group">
-                    <label for="state">오리 상태</label>
-                    <select id="state" name="state" required>
-                        ${state_options.map(opt => `
-                            <option value="${opt.value}" ${opt.value === challenge.state ? 'selected' : ''}>
-                                ${opt.label}
-                            </option>
-                        `).join('')}
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="streak">연속 일수 🔥</label>
-                    <input type="number" id="streak" name="streak" value="${challenge.streak}" min="0" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="growth_days">성장일 🌱</label>
-                    <input type="number" id="growth_days" name="growth_days" value="${challenge.growth_days ?? 0}" min="0" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="total_days">총 일수 📅</label>
-                    <input type="number" id="total_days" name="total_days" value="${challenge.total_days}" min="0" required>
-                </div>
-            `;
-        } else {
-            formHTML += '<div class="no-challenge">활성화된 도전이 없습니다.</div>';
-        }
-
-        formHTML += `
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">저장</button>
-                    <button type="button" class="btn btn-secondary" id="cancel-btn">취소</button>
-                </div>
-            </form>
-        `;
-
-        modalContent.innerHTML = formHTML;
-
-        // 이벤트 리스너 등록
-        document.getElementById('edit-form').addEventListener('submit', handleSubmit);
-        document.getElementById('cancel-btn').addEventListener('click', closeModal);
-    }
-
-    // 폼 제출 처리
-    async function handleSubmit(event) {
-        event.preventDefault();
-
-        const submitBtn = event.target.querySelector('button[type="submit"]');
-        submitBtn.classList.add('loading');
-        submitBtn.disabled = true;
-
-        const formData = {
-            gold: parseInt(document.getElementById('gold').value),
-            ducks_raised: parseInt(document.getElementById('ducks_raised').value)
-        };
-
-        // 도전 정보가 있는 경우
-        const challengeIdInput = document.getElementById('challenge_id');
-        if (challengeIdInput) {
-            formData.challenge_id = challengeIdInput.value;
-            formData.state = document.getElementById('state').value;
-            formData.streak = parseInt(document.getElementById('streak').value);
-            formData.growth_days = parseInt(document.getElementById('growth_days').value);
-            formData.total_days = parseInt(document.getElementById('total_days').value);
-        }
-
-        try {
-            const response = await fetch(`/api/users/${currentUserId}/update`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(formData)
-            });
-
-            const result = await response.json();
-
-            if (!result.success) {
-                showError(result.message);
-                submitBtn.classList.remove('loading');
-                submitBtn.disabled = false;
-                return;
-            }
-
-            // 테이블 행 업데이트
-            updateTableRow(result.updated_user);
-
-            // 성공 메시지 표시 후 모달 닫기
-            showSuccess(result.message);
-            setTimeout(() => {
-                closeModal();
-            }, 1000);
-
-        } catch (error) {
-            showError('저장 중 오류가 발생했습니다.');
-            console.error('Error:', error);
-            submitBtn.classList.remove('loading');
-            submitBtn.disabled = false;
-        }
-    }
-
-    // 테이블 행 실시간 업데이트
-    function updateTableRow(userData) {
-        const rows = document.querySelectorAll('.user-table tbody tr');
-
-        rows.forEach(row => {
-            const userIdCell = row.querySelector('td:first-child');
-            if (userIdCell && userIdCell.textContent === String(userData.user_id)) {
-                // 골드 업데이트
-                const goldCell = row.querySelector('td:nth-child(4)');
-                if (goldCell) {
-                    goldCell.textContent = `💰 ${userData.gold}G`;
-                }
-
-                // 졸업 오리 업데이트
-                const ducksCell = row.querySelector('td:nth-child(3)');
-                if (ducksCell) {
-                    ducksCell.textContent = `🎓 ${userData.ducks_raised}`;
-                }
-            }
-        });
-    }
-
-    // ==================== 인라인 편집 함수들 ====================
-
-    // 편집 모드 진입
-    function enterEditMode(cell) {
-        // 이미 편집 중인 셀이 있으면 저장하고 종료
-        if (currentEditingCell && currentEditingCell !== cell) {
-            exitEditMode(currentEditingCell, true);
-        }
-
-        currentEditingCell = cell;
-        originalValue = cell.getAttribute('data-value');
-
-        // 셀 스타일 변경
-        cell.classList.add('editing');
-        const row = cell.closest('tr');
-        row.classList.add('editing-row');
-
-        // input 생성
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.className = 'inline-input';
-        input.value = originalValue;
-        input.min = '0';
-        input.step = '1';
-
-        // 이벤트 리스너
-        input.addEventListener('keydown', handleKeyDown);
-        input.addEventListener('blur', function() {
-            // blur 시 값이 변경되었으면 저장
-            if (input.value !== originalValue) {
-                exitEditMode(cell, true);
-            } else {
-                exitEditMode(cell, false);
-            }
-        });
-
-        cell.appendChild(input);
-        input.focus();
-        input.select();
-    }
-
-    // 편집 모드 종료
-    function exitEditMode(cell, shouldSave) {
-        if (!cell || !cell.classList.contains('editing')) {
+    document.addEventListener('DOMContentLoaded', function () {
+        const table = document.querySelector('.user-table');
+        if (!table) {
             return;
         }
 
-        const input = cell.querySelector('.inline-input');
-        const newValue = input ? input.value : originalValue;
-
-        // input 제거
-        if (input) {
-            input.remove();
+        const tbody = table.querySelector('tbody');
+        if (!tbody) {
+            return;
         }
 
-        // 스타일 복원
-        cell.classList.remove('editing');
-        const row = cell.closest('tr');
-        row.classList.remove('editing-row');
+        let currentEditingCell = null;
+        let originalValue = null;
 
-        if (shouldSave && newValue !== originalValue) {
-            saveValue(cell, newValue);
-        } else {
-            // 저장하지 않으면 원래 값으로 복원
-            updateCellDisplay(cell, originalValue);
+        function getFieldCell(row, field) {
+            return row.querySelector(`.editable-cell[data-field="${field}"]`);
         }
 
-        currentEditingCell = null;
-        originalValue = null;
-    }
-
-    // 키보드 이벤트 처리
-    function handleKeyDown(event) {
-        const input = event.target;
-        const cell = input.closest('.editable-cell');
-
-        switch(event.key) {
-            case 'Enter':
-                event.preventDefault();
-                exitEditMode(cell, true);
-                // 다음 행의 같은 컬럼으로 이동
-                moveToNextCell(cell, 'down');
-                break;
-            case 'Tab':
-                event.preventDefault();
-                exitEditMode(cell, true);
-                // Tab: 다음 셀, Shift+Tab: 이전 셀
-                moveToNextCell(cell, event.shiftKey ? 'prev' : 'next');
-                break;
-            case 'Escape':
-                event.preventDefault();
-                exitEditMode(cell, false);
-                break;
-        }
-    }
-
-    // 다음 셀로 이동
-    function moveToNextCell(currentCell, direction) {
-        const row = currentCell.closest('tr');
-        const cells = Array.from(row.querySelectorAll('.editable-cell'));
-        const currentIndex = cells.indexOf(currentCell);
-
-        let nextCell = null;
-
-        if (direction === 'next') {
-            // 같은 행의 다음 편집 가능 셀
-            if (currentIndex < cells.length - 1) {
-                nextCell = cells[currentIndex + 1];
-            } else {
-                // 다음 행의 첫 번째 편집 가능 셀
-                const nextRow = row.nextElementSibling;
-                if (nextRow) {
-                    nextCell = nextRow.querySelector('.editable-cell');
-                }
+        function getFieldValue(row, field) {
+            const cell = getFieldCell(row, field);
+            if (!cell) {
+                return 0;
             }
-        } else if (direction === 'prev') {
-            // 같은 행의 이전 편집 가능 셀
-            if (currentIndex > 0) {
-                nextCell = cells[currentIndex - 1];
-            } else {
-                // 이전 행의 마지막 편집 가능 셀
-                const prevRow = row.previousElementSibling;
-                if (prevRow) {
-                    const prevCells = prevRow.querySelectorAll('.editable-cell');
-                    nextCell = prevCells[prevCells.length - 1];
-                }
-            }
-        } else if (direction === 'down') {
-            // 다음 행의 같은 컬럼
-            const nextRow = row.nextElementSibling;
-            if (nextRow) {
-                const nextCells = Array.from(nextRow.querySelectorAll('.editable-cell'));
-                if (currentIndex < nextCells.length) {
-                    nextCell = nextCells[currentIndex];
-                }
-            }
+            const parsed = parseInt(cell.getAttribute('data-value') || '0', 10);
+            return Number.isInteger(parsed) ? parsed : 0;
         }
 
-        if (nextCell) {
-            // 약간의 지연 후 다음 셀 편집
-            setTimeout(() => {
-                enterEditMode(nextCell);
-            }, 50);
-        }
-    }
+        function getRequestData(row, overrides = {}) {
+            const data = {
+                gold: getFieldValue(row, 'gold'),
+                ducks_raised: getFieldValue(row, 'ducks_raised'),
+            };
 
-    // API 호출 및 저장
-    async function saveValue(cell, newValue) {
-        const row = cell.closest('tr');
-        const userId = row.getAttribute('data-user-id');
-        const field = cell.getAttribute('data-field');
-
-        // 저장 중 표시
-        cell.classList.add('saving');
-
-        // 현재 행의 모든 데이터 수집
-        const requestData = {};
-        const editableCells = row.querySelectorAll('.editable-cell');
-        editableCells.forEach(c => {
-            const f = c.getAttribute('data-field');
-            if (c === cell) {
-                requestData[f] = parseInt(newValue);
-            } else {
-                requestData[f] = parseInt(c.getAttribute('data-value'));
+            const challengeId = row.getAttribute('data-challenge-id');
+            if (challengeId) {
+                const stateSelect = row.querySelector('.state-select');
+                data.challenge_id = challengeId;
+                data.state = stateSelect ? stateSelect.value : 'EGG';
+                data.streak = getFieldValue(row, 'streak');
+                data.growth_days = getFieldValue(row, 'growth_days');
+                data.total_days = getFieldValue(row, 'total_days');
             }
-        });
 
-        try {
+            return Object.assign(data, overrides);
+        }
+
+        async function saveRow(row, payload) {
+            const userId = row.getAttribute('data-user-id');
             const response = await fetch(`/api/users/${userId}/update`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(requestData)
+                body: JSON.stringify(payload),
             });
 
-            const result = await response.json();
+            let result;
+            try {
+                result = await response.json();
+            } catch (_) {
+                result = { success: false, message: '서버 응답을 해석할 수 없습니다.' };
+            }
+            return result;
+        }
 
-            // 저장 중 표시 제거
-            cell.classList.remove('saving');
+        function updateCellDisplay(cell, value) {
+            const emoji = cell.getAttribute('data-emoji') || '';
+            const suffix = cell.getAttribute('data-suffix') || '';
+            const cellContent = cell.querySelector('.cell-content');
+            const display = emoji ? `${emoji} ${value}${suffix}` : `${value}${suffix}`;
+            if (cellContent) {
+                cellContent.textContent = display;
+            }
+            cell.setAttribute('data-sort-value', String(value));
+        }
 
-            if (!result.success) {
-                // 에러 처리
-                cell.classList.add('error');
-                showErrorTooltip(cell, result.message || '저장에 실패했습니다.');
+        function showErrorTooltip(target, message) {
+            const existingTooltip = target.querySelector('.error-tooltip');
+            if (existingTooltip) {
+                existingTooltip.remove();
+            }
 
-                // 원래 값으로 복원
-                setTimeout(() => {
-                    cell.classList.remove('error');
-                    updateCellDisplay(cell, originalValue);
-                }, 3000);
+            const tooltip = document.createElement('div');
+            tooltip.className = 'error-tooltip';
+            tooltip.textContent = message;
+            target.style.position = 'relative';
+            target.appendChild(tooltip);
 
+            setTimeout(() => {
+                tooltip.remove();
+            }, 3000);
+        }
+
+        function enterEditMode(cell) {
+            if (cell.classList.contains('saving')) {
                 return;
             }
 
-            // 성공 처리
-            cell.classList.add('success');
+            if (currentEditingCell && currentEditingCell !== cell) {
+                exitEditMode(currentEditingCell, true);
+            }
 
-            // data-value 업데이트
-            cell.setAttribute('data-value', newValue);
-            updateCellDisplay(cell, newValue);
+            currentEditingCell = cell;
+            originalValue = cell.getAttribute('data-value') || '0';
 
-            // 성공 애니메이션 제거
-            setTimeout(() => {
-                cell.classList.remove('success');
-            }, 800);
+            cell.classList.add('editing');
+            const row = cell.closest('tr');
+            if (row) {
+                row.classList.add('editing-row');
+            }
 
-        } catch (error) {
-            console.error('저장 오류:', error);
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'inline-input';
+            input.value = originalValue;
+            input.min = '0';
+            input.step = '1';
 
-            // 저장 중 표시 제거
-            cell.classList.remove('saving');
-
-            // 에러 처리
-            cell.classList.add('error');
-            showErrorTooltip(cell, '네트워크 오류가 발생했습니다.');
-
-            // 원래 값으로 복원
-            setTimeout(() => {
-                cell.classList.remove('error');
-                updateCellDisplay(cell, originalValue);
-            }, 3000);
-        }
-    }
-
-    // 셀 표시 업데이트
-    function updateCellDisplay(cell, value) {
-        const emoji = cell.getAttribute('data-emoji') || '';
-        const suffix = cell.getAttribute('data-suffix') || '';
-        const cellContent = cell.querySelector('.cell-content');
-
-        if (cellContent) {
-            cellContent.textContent = `${emoji} ${value}${suffix}`;
-        }
-    }
-
-    // 에러 툴팁 표시
-    function showErrorTooltip(cell, message) {
-        // 기존 툴팁 제거
-        const existingTooltip = cell.querySelector('.error-tooltip');
-        if (existingTooltip) {
-            existingTooltip.remove();
-        }
-
-        // 새 툴팁 생성
-        const tooltip = document.createElement('div');
-        tooltip.className = 'error-tooltip';
-        tooltip.textContent = message;
-        cell.style.position = 'relative';
-        cell.appendChild(tooltip);
-
-        // 3초 후 제거
-        setTimeout(() => {
-            tooltip.remove();
-        }, 3000);
-    }
-
-    // 편집 리스너 등록
-    function attachEditListeners() {
-        const editableCells = document.querySelectorAll('.editable-cell');
-        editableCells.forEach(cell => {
-            // 더블클릭으로 편집 시작
-            cell.addEventListener('dblclick', function() {
-                enterEditMode(this);
-            });
-        });
-    }
-
-    // ==================== 이벤트 리스너 등록 ====================
-    document.addEventListener('DOMContentLoaded', function() {
-        // 인라인 편집 리스너 등록
-        attachEditListeners();
-
-        // 모든 고급 설정 버튼에 이벤트 리스너 추가
-        const advancedButtons = document.querySelectorAll('.btn-advanced');
-        advancedButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                const userId = this.getAttribute('data-user-id'); // 문자열로 유지
-                openModal(userId);
-            });
-        });
-
-        // 모달 닫기 버튼
-        if (closeBtn) {
-            closeBtn.addEventListener('click', closeModal);
-        }
-
-        // 모달 외부 클릭 시 닫기
-        if (modal) {
-            modal.addEventListener('click', function(event) {
-                if (event.target === modal) {
-                    closeModal();
+            input.addEventListener('keydown', handleKeyDown);
+            input.addEventListener('blur', function () {
+                if (input.value !== originalValue) {
+                    exitEditMode(cell, true);
+                } else {
+                    exitEditMode(cell, false);
                 }
             });
+
+            cell.appendChild(input);
+            input.focus();
+            input.select();
         }
 
-        // ESC 키로 모달 닫기 (인라인 편집 중이 아닐 때만)
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape' && modal.classList.contains('active') && !currentEditingCell) {
-                closeModal();
+        function exitEditMode(cell, shouldSave) {
+            if (!cell || !cell.classList.contains('editing')) {
+                return;
             }
-        });
+
+            const input = cell.querySelector('.inline-input');
+            const newValue = input ? input.value : originalValue;
+
+            if (input) {
+                input.remove();
+            }
+
+            cell.classList.remove('editing');
+            const row = cell.closest('tr');
+            if (row) {
+                row.classList.remove('editing-row');
+            }
+
+            if (shouldSave && newValue !== originalValue) {
+                saveNumericValue(cell, newValue);
+            } else {
+                updateCellDisplay(cell, originalValue);
+            }
+
+            currentEditingCell = null;
+            originalValue = null;
+        }
+
+        function handleKeyDown(event) {
+            const input = event.target;
+            const cell = input.closest('.editable-cell');
+            if (!cell) {
+                return;
+            }
+
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                exitEditMode(cell, true);
+                moveToNextCell(cell, 'down');
+                return;
+            }
+
+            if (event.key === 'Tab') {
+                event.preventDefault();
+                exitEditMode(cell, true);
+                moveToNextCell(cell, event.shiftKey ? 'prev' : 'next');
+                return;
+            }
+
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                exitEditMode(cell, false);
+            }
+        }
+
+        function moveToNextCell(currentCell, direction) {
+            const row = currentCell.closest('tr');
+            if (!row) {
+                return;
+            }
+
+            const editableCells = Array.from(row.querySelectorAll('.editable-cell'));
+            const currentIndex = editableCells.indexOf(currentCell);
+            let nextCell = null;
+
+            if (direction === 'next') {
+                if (currentIndex < editableCells.length - 1) {
+                    nextCell = editableCells[currentIndex + 1];
+                } else {
+                    const nextRow = row.nextElementSibling;
+                    if (nextRow) {
+                        nextCell = nextRow.querySelector('.editable-cell');
+                    }
+                }
+            } else if (direction === 'prev') {
+                if (currentIndex > 0) {
+                    nextCell = editableCells[currentIndex - 1];
+                } else {
+                    const prevRow = row.previousElementSibling;
+                    if (prevRow) {
+                        const prevCells = prevRow.querySelectorAll('.editable-cell');
+                        nextCell = prevCells[prevCells.length - 1] || null;
+                    }
+                }
+            } else if (direction === 'down') {
+                const nextRow = row.nextElementSibling;
+                if (nextRow) {
+                    const nextCells = Array.from(nextRow.querySelectorAll('.editable-cell'));
+                    if (currentIndex < nextCells.length) {
+                        nextCell = nextCells[currentIndex];
+                    }
+                }
+            }
+
+            if (nextCell) {
+                setTimeout(() => {
+                    enterEditMode(nextCell);
+                }, 50);
+            }
+        }
+
+        async function saveNumericValue(cell, rawValue) {
+            const parsed = parseInt(rawValue, 10);
+            if (!Number.isInteger(parsed) || parsed < 0) {
+                cell.classList.add('error');
+                showErrorTooltip(cell, '0 이상의 정수만 입력 가능합니다.');
+                updateCellDisplay(cell, originalValue || cell.getAttribute('data-value') || '0');
+                setTimeout(() => {
+                    cell.classList.remove('error');
+                }, 1200);
+                return;
+            }
+
+            const row = cell.closest('tr');
+            if (!row) {
+                return;
+            }
+
+            const field = cell.getAttribute('data-field');
+            if (!field) {
+                return;
+            }
+
+            cell.classList.add('saving');
+            const requestData = getRequestData(row, { [field]: parsed });
+
+            try {
+                const result = await saveRow(row, requestData);
+                cell.classList.remove('saving');
+
+                if (!result.success) {
+                    cell.classList.add('error');
+                    showErrorTooltip(cell, result.message || '저장에 실패했습니다.');
+                    updateCellDisplay(cell, cell.getAttribute('data-value') || '0');
+                    setTimeout(() => {
+                        cell.classList.remove('error');
+                    }, 1600);
+                    return;
+                }
+
+                cell.setAttribute('data-value', String(parsed));
+                updateCellDisplay(cell, parsed);
+                cell.classList.add('success');
+                setTimeout(() => {
+                    cell.classList.remove('success');
+                }, 800);
+            } catch (error) {
+                console.error('저장 오류:', error);
+                cell.classList.remove('saving');
+                cell.classList.add('error');
+                showErrorTooltip(cell, '네트워크 오류가 발생했습니다.');
+                updateCellDisplay(cell, cell.getAttribute('data-value') || '0');
+                setTimeout(() => {
+                    cell.classList.remove('error');
+                }, 1600);
+            }
+        }
+
+        async function handleStateChange(select) {
+            const row = select.closest('tr');
+            if (!row) {
+                return;
+            }
+
+            const challengeId = row.getAttribute('data-challenge-id');
+            if (!challengeId) {
+                return;
+            }
+
+            const stateCell = select.closest('.state-cell');
+            const prevValue = select.getAttribute('data-prev-value') || select.value;
+
+            select.disabled = true;
+            if (stateCell) {
+                stateCell.classList.add('saving');
+            }
+
+            try {
+                const result = await saveRow(row, getRequestData(row, { state: select.value }));
+
+                if (!result.success) {
+                    select.value = prevValue;
+                    if (stateCell) {
+                        stateCell.classList.add('error');
+                        showErrorTooltip(stateCell, result.message || '상태 저장에 실패했습니다.');
+                        setTimeout(() => {
+                            stateCell.classList.remove('error');
+                        }, 1600);
+                    }
+                    return;
+                }
+
+                select.setAttribute('data-prev-value', select.value);
+                if (stateCell) {
+                    stateCell.setAttribute('data-sort-value', select.value);
+                    stateCell.classList.add('success');
+                    setTimeout(() => {
+                        stateCell.classList.remove('success');
+                    }, 800);
+                }
+            } catch (error) {
+                console.error('상태 저장 오류:', error);
+                select.value = prevValue;
+                if (stateCell) {
+                    stateCell.classList.add('error');
+                    showErrorTooltip(stateCell, '네트워크 오류가 발생했습니다.');
+                    setTimeout(() => {
+                        stateCell.classList.remove('error');
+                    }, 1600);
+                }
+            } finally {
+                if (stateCell) {
+                    stateCell.classList.remove('saving');
+                }
+                select.disabled = false;
+            }
+        }
+
+        function parseSortValue(row, key, type) {
+            const cell = row.querySelector(`[data-key="${key}"]`);
+            if (!cell) {
+                return type === 'number' || type === 'date' ? Number.NEGATIVE_INFINITY : '';
+            }
+
+            const raw = (cell.getAttribute('data-sort-value') || '').trim();
+
+            if (type === 'number') {
+                const value = Number(raw);
+                return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+            }
+
+            if (type === 'date') {
+                if (!raw) {
+                    return Number.NEGATIVE_INFINITY;
+                }
+                const timestamp = Date.parse(raw);
+                return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+            }
+
+            return raw.toLowerCase();
+        }
+
+        function applySortIndicator(activeHeader, direction) {
+            const headers = table.querySelectorAll('th.sortable');
+            headers.forEach((header) => {
+                header.classList.remove('sort-asc', 'sort-desc');
+            });
+
+            if (activeHeader) {
+                activeHeader.classList.add(direction === 'asc' ? 'sort-asc' : 'sort-desc');
+            }
+        }
+
+        function sortRows(key, type, direction) {
+            const rows = Array.from(tbody.querySelectorAll('tr[data-user-id]'));
+            rows.sort((a, b) => {
+                const aValue = parseSortValue(a, key, type);
+                const bValue = parseSortValue(b, key, type);
+
+                if (aValue < bValue) {
+                    return -1;
+                }
+                if (aValue > bValue) {
+                    return 1;
+                }
+                return 0;
+            });
+
+            if (direction === 'desc') {
+                rows.reverse();
+            }
+
+            rows.forEach((row) => {
+                tbody.appendChild(row);
+            });
+        }
+
+        function attachInlineEditors() {
+            const editableCells = table.querySelectorAll('.editable-cell');
+            editableCells.forEach((cell) => {
+                cell.addEventListener('dblclick', function () {
+                    enterEditMode(this);
+                });
+            });
+        }
+
+        function attachStateEditors() {
+            const stateSelects = table.querySelectorAll('.state-select');
+            stateSelects.forEach((select) => {
+                select.addEventListener('change', function () {
+                    handleStateChange(this);
+                });
+            });
+        }
+
+        function attachSortHandlers() {
+            let currentKey = '';
+            let currentDirection = 'asc';
+
+            const headers = table.querySelectorAll('th.sortable');
+            headers.forEach((header) => {
+                header.addEventListener('click', function () {
+                    const key = this.getAttribute('data-key');
+                    const type = this.getAttribute('data-type') || 'text';
+                    if (!key) {
+                        return;
+                    }
+
+                    if (currentKey === key) {
+                        currentDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        currentKey = key;
+                        currentDirection = 'asc';
+                    }
+
+                    sortRows(currentKey, type, currentDirection);
+                    applySortIndicator(this, currentDirection);
+                });
+            });
+        }
+
+        attachInlineEditors();
+        attachStateEditors();
+        attachSortHandlers();
     });
 })();
