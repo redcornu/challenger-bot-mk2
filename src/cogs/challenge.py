@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import logging
+import re
 from config import BotStates, BotConfig, MESSAGE_DELETE_AFTER, IMAGE_PATHS, STATE_KOREAN, normalize_state
 from database import get_challenge, create_challenge, update_challenge, get_user, create_user, update_user_inventory, upsert_user_profile
 from config import EMBED_COLORS
@@ -16,6 +17,18 @@ class ChallengeCog(commands.Cog):
 
     def _author_display_name(self, author) -> str:
         return getattr(author, 'display_name', None) or author.name
+
+    def _state_from_growth_days(self, growth_days: int) -> str:
+        """성장일 기준 정상 상태 계산"""
+        if growth_days >= BotConfig.GRADUATION_DAYS:
+            return BotStates.DONE
+        if growth_days >= BotConfig.ADULT_DAYS:
+            return BotStates.ADULT
+        if growth_days >= BotConfig.ADOLESCENT_DAYS:
+            return BotStates.ADOLESCENT
+        if growth_days >= BotConfig.HATCH_DAYS:
+            return BotStates.DUCKLING
+        return BotStates.EGG
 
     @commands.command(name='목표설정')
     async def set_goal(self, ctx, *, goal: str):
@@ -340,6 +353,70 @@ class ChallengeCog(commands.Cog):
 
         await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
 
+    @commands.command(name='수정')
+    async def edit_growth_day(self, ctx, *, day_text: str):
+        """성장일 수정 (예: !수정 10일차)"""
+        upsert_user_profile(ctx.author.id, self._author_display_name(ctx.author))
+
+        if not isinstance(ctx.channel, discord.Thread):
+            embed = EmbedBuilder.error("오류", "이 명령어는 도전 스레드에서만 사용 가능합니다.")
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            return
+
+        challenge = get_challenge(ctx.channel.id)
+        if not challenge:
+            embed = EmbedBuilder.error("도전 없음", "먼저 !목표설정으로 도전을 시작하세요.")
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            return
+
+        if not await self._check_ownership(ctx, challenge):
+            return
+
+        # 허용 형식: 10 / 10일 / 10일차 / 10일 차
+        match = re.match(r'^\s*(\d+)\s*일?\s*차?\s*$', day_text)
+        if not match:
+            embed = EmbedBuilder.error(
+                "형식 오류",
+                "사용법: `!수정 10일차` 또는 `!수정 10일 차`"
+            )
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            return
+
+        new_growth_days = int(match.group(1))
+        if new_growth_days < 0:
+            embed = EmbedBuilder.error("입력 오류", "일차는 0 이상이어야 합니다.")
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            return
+
+        old_growth_days = challenge['growth_days']
+        old_state = normalize_state(challenge['state'])
+        new_state = self._state_from_growth_days(new_growth_days)
+
+        # total_days는 성장일보다 작으면 보정
+        new_total_days = challenge['total_days']
+        if new_total_days < new_growth_days:
+            new_total_days = new_growth_days
+
+        success = update_challenge(
+            ctx.channel.id,
+            state=new_state,
+            growth_days=new_growth_days,
+            total_days=new_total_days
+        )
+        if not success:
+            embed = EmbedBuilder.error("수정 실패", "성장일 수정 중 오류가 발생했습니다.")
+            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            return
+
+        embed = EmbedBuilder.success(
+            "수정 완료",
+            (
+                f"📅 성장일: D+{old_growth_days} → D+{new_growth_days}\n"
+                f"🦆 상태: {STATE_KOREAN.get(old_state, old_state)} → {STATE_KOREAN.get(new_state, new_state)}"
+            )
+        )
+        await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+
     @commands.command(name='가이드')
     async def guide(self, ctx):
         """사용 설명서"""
@@ -375,6 +452,7 @@ class ChallengeCog(commands.Cog):
 `!상점`: 구매 가능한 아이템을 확인합니다.
 `!구매 [아이템]`: 아이템을 구매합니다.
 `!사용 [아이템]`: 아이템을 사용합니다.
+`!수정 [일차]`: 성장일을 수정합니다. (예: `!수정 10일차`)
 `!가이드`: 이 도움말을 다시 봅니다."""
 
         embed = discord.Embed(
