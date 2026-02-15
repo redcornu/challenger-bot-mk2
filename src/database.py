@@ -240,6 +240,32 @@ def get_user_total_auth_days(user_id: int) -> int:
         result = c.fetchone()
         return result['total'] if result else 0
 
+def get_system_config(key: str, default: Optional[str] = None) -> Optional[str]:
+    """시스템 설정값 조회"""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT value FROM system_config WHERE key = ?", (key,))
+        row = c.fetchone()
+        return row['value'] if row else default
+
+def set_system_config(key: str, value: str) -> bool:
+    """시스템 설정값 저장"""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute(
+                '''
+                INSERT INTO system_config (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                ''',
+                (key, value)
+            )
+            return True
+    except Exception as e:
+        logger.error(f"Failed to set system config {key}: {type(e).__name__}: {e}")
+        return False
+
 def get_top_users(limit: int = 10) -> List[Dict]:
     """상위 유저 조회 - 졸업 오리 > 총 인증일 > 골드 순"""
     with get_db_connection() as conn:
