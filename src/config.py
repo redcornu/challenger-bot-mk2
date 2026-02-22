@@ -21,8 +21,14 @@ if not DISCORD_TOKEN:
 DB_PATH = os.getenv('DB_PATH', 'data/bot.db')
 
 # Flask 서버 설정
-FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
-FLASK_PORT = int(os.getenv('FLASK_PORT', '5001'))
+# 기본값은 Nginx 리버스 프록시 전제를 고려해 loopback(127.0.0.1)로 제한
+ADMIN_FLASK_HOST = os.getenv('ADMIN_FLASK_HOST', os.getenv('FLASK_HOST', '127.0.0.1'))
+ADMIN_FLASK_PORT = int(os.getenv('ADMIN_FLASK_PORT', os.getenv('FLASK_PORT', '5101')))
+USER_WEB_HOST = os.getenv('USER_WEB_HOST', '127.0.0.1')
+USER_WEB_PORT = int(os.getenv('USER_WEB_PORT', '5102'))
+# 하위 호환성: 기존 코드에서 FLASK_HOST/FLASK_PORT를 사용할 수 있도록 유지
+FLASK_HOST = ADMIN_FLASK_HOST
+FLASK_PORT = ADMIN_FLASK_PORT
 MANAGE_FLASK_LIFECYCLE = env_to_bool('MANAGE_FLASK_LIFECYCLE', False)
 
 # 봇 설정
@@ -85,7 +91,7 @@ class BotConfig:
     GRADUATION_DAYS = 66
 
     SULKY_RECOVERY_DAYS = 3
-    RUNAWAY_RECOVERY_DAYS = 7
+    RUNAWAY_RECOVERY_DAYS = 3
 
     DAILY_GOLD_REWARD = 1
 

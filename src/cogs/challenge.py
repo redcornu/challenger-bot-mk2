@@ -31,6 +31,13 @@ class ChallengeCog(commands.Cog):
     def _author_display_name(self, author) -> str:
         return getattr(author, 'display_name', None) or author.name
 
+    def _is_auth_test_bypass_user(self, author) -> bool:
+        """테스트 전용 인증 제한 우회 유저 확인"""
+        bypass_names = {'요진편'}
+        display_name = (getattr(author, 'display_name', None) or '').strip()
+        username = (getattr(author, 'name', None) or '').strip()
+        return display_name in bypass_names or username in bypass_names
+
     def _state_from_growth_days(self, growth_days: int) -> str:
         """성장일 기준 정상 상태 계산"""
         if growth_days >= BotConfig.GRADUATION_DAYS:
@@ -87,15 +94,15 @@ class ChallengeCog(commands.Cog):
             return None
 
         for frame_text in frames[1:]:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
             try:
                 await loading_message.edit(embed=EmbedBuilder.info('인증 처리 중', frame_text))
             except Exception as e:
                 self.logger.warning(f"[인증 로딩] 로딩 메시지 edit 실패: {type(e).__name__}: {e}")
                 break
 
-        # 마지막 프레임도 1초 유지해 총 3초(1초 x 3단계) 연출
-        await asyncio.sleep(1.0)
+        # 마지막 프레임도 1.5초 유지해 총 4.5초(1.5초 x 3단계) 연출
+        await asyncio.sleep(1.5)
         return loading_message
 
     @commands.command(name='목표설정')
@@ -219,9 +226,10 @@ class ChallengeCog(commands.Cog):
                 return
 
             # 중복 인증 방지 (락 내부 재검증)
+            is_test_bypass_user = self._is_auth_test_bypass_user(ctx.author)
             today = get_kst_now().date().isoformat()
             self.logger.info(f"[중복 인증 체크] 사용자: {ctx.author.id}, 오늘: {today}, 마지막 인증: {challenge['last_auth_date']}")
-            if challenge['last_auth_date'] == today:
+            if challenge['last_auth_date'] == today and not is_test_bypass_user:
                 self.logger.warning(f"[중복 인증 차단] 사용자: {ctx.author.id}가 오늘 이미 인증함")
                 embed = EmbedBuilder.error(
                     "이미 인증 완료",
@@ -229,6 +237,8 @@ class ChallengeCog(commands.Cog):
                 )
                 await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
                 return
+            if challenge['last_auth_date'] == today and is_test_bypass_user:
+                self.logger.info(f"[테스트 우회] 사용자: {ctx.author.id} 중복 인증 제한 우회 허용")
 
             loading_message = await self._run_auth_loading_animation(ctx)
 
@@ -271,6 +281,9 @@ class ChallengeCog(commands.Cog):
                 days_diff = (today_date - last_date).days
             else:
                 days_diff = 1  # 첫 인증
+            if is_test_bypass_user and days_diff <= 0:
+                # 테스트 계정은 같은 날 반복 인증도 1일 진행으로 처리
+                days_diff = 1
 
             # 상태별 처리
             if current_state in [BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT, BotStates.ADULT]:
@@ -303,7 +316,7 @@ class ChallengeCog(commands.Cog):
                     new_state = BotStates.RUNAWAY
                     new_streak = 0
                     new_total += 1
-                    message_extra = "\n\n🏃 **오리가 가출했습니다!**\n7일 연속 인증하면 돌아옵니다."
+                    message_extra = f"\n\n🏃 **오리가 가출했습니다!**\n{BotConfig.RUNAWAY_RECOVERY_DAYS}일 연속 인증하면 돌아옵니다."
 
             elif current_state == BotStates.SULKY:
                 # 삐진 상태
@@ -332,7 +345,7 @@ class ChallengeCog(commands.Cog):
                     new_state = BotStates.RUNAWAY
                     new_streak = 0
                     new_total += 1
-                    message_extra = "\n\n🏃 **오리가 가출했습니다!**\n7일 연속 인증하면 돌아옵니다."
+                    message_extra = f"\n\n🏃 **오리가 가출했습니다!**\n{BotConfig.RUNAWAY_RECOVERY_DAYS}일 연속 인증하면 돌아옵니다."
 
             elif current_state == BotStates.RUNAWAY:
                 # 가출 상태
@@ -342,7 +355,7 @@ class ChallengeCog(commands.Cog):
                     new_total += 1
 
                     if new_streak >= BotConfig.RUNAWAY_RECOVERY_DAYS:
-                        # 7일 연속 인증 → 복구!
+                        # RUNAWAY_RECOVERY_DAYS 연속 인증 → 복구!
                         # growth_days로 상태 복구
                         if new_growth >= BotConfig.ADULT_DAYS:
                             new_state = BotStates.ADULT
