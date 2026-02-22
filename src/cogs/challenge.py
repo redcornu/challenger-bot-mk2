@@ -87,14 +87,15 @@ class ChallengeCog(commands.Cog):
             return None
 
         for frame_text in frames[1:]:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             try:
                 await loading_message.edit(embed=EmbedBuilder.info('인증 처리 중', frame_text))
             except Exception as e:
                 self.logger.warning(f"[인증 로딩] 로딩 메시지 edit 실패: {type(e).__name__}: {e}")
                 break
 
-        await asyncio.sleep(0.5)
+        # 마지막 프레임도 1초 유지해 총 3초(1초 x 3단계) 연출
+        await asyncio.sleep(1.0)
         return loading_message
 
     @commands.command(name='목표설정')
