@@ -1,11 +1,21 @@
 import sqlite3
 import json
 import logging
+from datetime import datetime
 from contextlib import contextmanager
 from typing import Optional, Dict, List, Any
 from config import DB_PATH, normalize_state
 
 logger = logging.getLogger(__name__)
+
+CHALLENGE_EVENT_TYPES = {
+    'CHALLENGE_CREATED',
+    'AUTH_SUCCESS',
+    'USER_EDIT',
+    'ADMIN_EDIT',
+    'SNAPSHOT',
+    'SYSTEM_SYNC',
+}
 
 @contextmanager
 def get_db_connection():
@@ -62,10 +72,34 @@ def init_db():
             )
         ''')
 
+        # 도전 이벤트 테이블 (타임라인)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS challenge_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                thread_id INTEGER NOT NULL,
+                event_date TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                before_state TEXT,
+                after_state TEXT,
+                before_streak INTEGER,
+                after_streak INTEGER,
+                before_growth_days INTEGER,
+                after_growth_days INTEGER,
+                before_total_days INTEGER,
+                after_total_days INTEGER,
+                source TEXT,
+                meta_json TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # 인덱스 생성 (성능 최적화)
         c.execute('CREATE INDEX IF NOT EXISTS idx_user_id ON duck_challenge(user_id)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_state ON duck_challenge(state)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_ranking ON users(ducks_raised DESC, gold DESC)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_challenge_events_user_date ON challenge_events(user_id, event_date DESC, id DESC)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_challenge_events_thread_date ON challenge_events(thread_id, event_date DESC, id DESC)')
 
         # 레거시 상태값 정규화 (DUCK -> DUCKLING)
         c.execute("UPDATE duck_challenge SET state = 'DUCKLING' WHERE state = 'DUCK'")
@@ -304,6 +338,132 @@ def get_user_challenges(user_id: int) -> List[Dict]:
                     (normalized_state, challenge['thread_id'])
                 )
         return challenges
+
+
+def _challenge_snapshot(challenge: Optional[Dict]) -> Dict[str, Any]:
+    """도전 데이터에서 이벤트 기록용 스냅샷 추출"""
+    challenge = challenge or {}
+    return {
+        'state': normalize_state(challenge.get('state')) if challenge.get('state') is not None else None,
+        'streak': challenge.get('streak'),
+        'growth_days': challenge.get('growth_days'),
+        'total_days': challenge.get('total_days'),
+    }
+
+
+def record_challenge_event(
+    user_id: int,
+    thread_id: int,
+    event_type: str,
+    before_challenge: Optional[Dict] = None,
+    after_challenge: Optional[Dict] = None,
+    event_date: Optional[str] = None,
+    source: str = 'SYSTEM',
+    meta: Optional[Dict[str, Any]] = None
+) -> bool:
+    """도전 이벤트 기록"""
+    if event_type not in CHALLENGE_EVENT_TYPES:
+        logger.warning(f"Unknown challenge event type: {event_type}")
+        return False
+
+    before = _challenge_snapshot(before_challenge)
+    after = _challenge_snapshot(after_challenge)
+
+    resolved_event_date = event_date
+    if not resolved_event_date:
+        resolved_event_date = (
+            (after_challenge or {}).get('last_auth_date')
+            or (before_challenge or {}).get('last_auth_date')
+            or datetime.now().date().isoformat()
+        )
+
+    if meta is None:
+        meta = {}
+
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute(
+                '''
+                INSERT INTO challenge_events (
+                    user_id, thread_id, event_date, event_type,
+                    before_state, after_state,
+                    before_streak, after_streak,
+                    before_growth_days, after_growth_days,
+                    before_total_days, after_total_days,
+                    source, meta_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    user_id,
+                    thread_id,
+                    resolved_event_date,
+                    event_type,
+                    before.get('state'),
+                    after.get('state'),
+                    before.get('streak'),
+                    after.get('streak'),
+                    before.get('growth_days'),
+                    after.get('growth_days'),
+                    before.get('total_days'),
+                    after.get('total_days'),
+                    source,
+                    json.dumps(meta, ensure_ascii=False),
+                )
+            )
+            return True
+    except Exception as e:
+        logger.error(
+            f"Failed to record challenge event user={user_id}, thread={thread_id}, "
+            f"type={event_type}: {type(e).__name__}: {e}"
+        )
+        return False
+
+
+def get_user_timeline_events(user_id: int, limit: int = 200) -> List[Dict]:
+    """유저 도전 이벤트 타임라인 조회 (최신순)"""
+    safe_limit = max(1, min(limit, 500))
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            '''
+            SELECT
+                id,
+                user_id,
+                thread_id,
+                event_date,
+                event_type,
+                before_state,
+                after_state,
+                before_streak,
+                after_streak,
+                before_growth_days,
+                after_growth_days,
+                before_total_days,
+                after_total_days,
+                source,
+                meta_json,
+                created_at
+            FROM challenge_events
+            WHERE user_id = ?
+            ORDER BY event_date DESC, id DESC
+            LIMIT ?
+            ''',
+            (user_id, safe_limit)
+        )
+        rows = [dict(row) for row in c.fetchall()]
+        for row in rows:
+            row['before_state'] = normalize_state(row.get('before_state'))
+            row['after_state'] = normalize_state(row.get('after_state'))
+            row['meta'] = {}
+            meta_raw = row.get('meta_json')
+            if meta_raw:
+                try:
+                    row['meta'] = json.loads(meta_raw)
+                except Exception:
+                    row['meta'] = {}
+        return rows
 
 def update_challenge_admin(thread_id: int, state: str = None,
                            streak: int = None, growth_days: int = None,
