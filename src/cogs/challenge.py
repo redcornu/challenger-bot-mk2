@@ -1,12 +1,23 @@
+import asyncio
 import discord
 from discord.ext import commands
 import logging
 import re
 from config import BotStates, BotConfig, MESSAGE_DELETE_AFTER, IMAGE_PATHS, STATE_KOREAN, normalize_state
-from database import get_challenge, create_challenge, update_challenge, get_user, create_user, update_user_inventory, upsert_user_profile
+from database import (
+    get_challenge,
+    create_challenge,
+    update_challenge,
+    get_user,
+    create_user,
+    update_user_inventory,
+    upsert_user_profile,
+    record_challenge_event,
+)
 from config import EMBED_COLORS
 from utils.validators import get_kst_now, safe_json_loads, safe_json_dumps
 from utils.embed_builder import EmbedBuilder
+from utils.duck_voice import pick_duck_line
 
 class ChallengeCog(commands.Cog):
     """도전 관련 명령어 그룹"""
@@ -14,6 +25,8 @@ class ChallengeCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.logger = logging.getLogger(__name__)
+        self._auth_locks = {}
+        self._last_duck_line_by_thread = {}
 
     def _author_display_name(self, author) -> str:
         return getattr(author, 'display_name', None) or author.name
@@ -29,6 +42,60 @@ class ChallengeCog(commands.Cog):
         if growth_days >= BotConfig.HATCH_DAYS:
             return BotStates.DUCKLING
         return BotStates.EGG
+
+    def _get_auth_lock(self, thread_id: int) -> asyncio.Lock:
+        lock = self._auth_locks.get(thread_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._auth_locks[thread_id] = lock
+        return lock
+
+    def _resolve_duck_voice_context(self, old_state: str, new_state: str) -> str:
+        normal_states = {
+            BotStates.EGG,
+            BotStates.DUCKLING,
+            BotStates.ADOLESCENT,
+            BotStates.ADULT,
+        }
+        if new_state == BotStates.DONE:
+            return 'DONE'
+        if new_state == BotStates.SULKY and old_state != BotStates.SULKY:
+            return 'SULKY_ENTER'
+        if new_state == BotStates.RUNAWAY and old_state != BotStates.RUNAWAY:
+            return 'RUNAWAY_ENTER'
+        if old_state == BotStates.SULKY and new_state in normal_states:
+            return 'SULKY_RECOVER'
+        if old_state == BotStates.RUNAWAY and new_state in normal_states:
+            return 'RUNAWAY_RECOVER'
+        if old_state != new_state and new_state in normal_states:
+            return 'LEVEL_UP'
+        return 'NORMAL_GROWTH'
+
+    async def _run_auth_loading_animation(self, ctx):
+        frames = [
+            '🍽️ 오늘의 도전을 잘게 준비 중... [■□□]',
+            '🥣 냠냠! 도전을 먹고 성장 에너지로 바꾸는 중... [■■□]',
+            '✨ 깃털 반짝! 오리가 자라고 있어요... [■■■]',
+        ]
+        try:
+            loading_message = await ctx.send(
+                embed=EmbedBuilder.info('인증 처리 중', frames[0]),
+                delete_after=MESSAGE_DELETE_AFTER
+            )
+        except Exception as e:
+            self.logger.warning(f"[인증 로딩] 로딩 메시지 전송 실패: {type(e).__name__}: {e}")
+            return None
+
+        for frame_text in frames[1:]:
+            await asyncio.sleep(0.5)
+            try:
+                await loading_message.edit(embed=EmbedBuilder.info('인증 처리 중', frame_text))
+            except Exception as e:
+                self.logger.warning(f"[인증 로딩] 로딩 메시지 edit 실패: {type(e).__name__}: {e}")
+                break
+
+        await asyncio.sleep(0.5)
+        return loading_message
 
     @commands.command(name='목표설정')
     async def set_goal(self, ctx, *, goal: str):
@@ -71,6 +138,18 @@ class ChallengeCog(commands.Cog):
         # 도전 생성
         success = create_challenge(ctx.channel.id, ctx.author.id, goal)
         if success:
+            created_challenge = get_challenge(ctx.channel.id)
+            record_challenge_event(
+                user_id=ctx.author.id,
+                thread_id=ctx.channel.id,
+                event_type='CHALLENGE_CREATED',
+                before_challenge=None,
+                after_challenge=created_challenge,
+                event_date=get_kst_now().date().isoformat(),
+                source='BOT',
+                meta={'goal_text': goal}
+            )
+
             embed = EmbedBuilder.success(
                 "도전 시작!",
                 f"**목표:** {goal}\n\n🥚 알이 부화하기 시작했습니다!\n매일 인증하여 오리를 키워주세요!"
@@ -121,182 +200,262 @@ class ChallengeCog(commands.Cog):
             await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return
 
-        # 중복 인증 방지
-        today = get_kst_now().date().isoformat()
-        self.logger.info(f"[중복 인증 체크] 사용자: {ctx.author.id}, 오늘: {today}, 마지막 인증: {challenge['last_auth_date']}")
-        if challenge['last_auth_date'] == today:
-            self.logger.warning(f"[중복 인증 차단] 사용자: {ctx.author.id}가 오늘 이미 인증함")
-            embed = EmbedBuilder.error(
-                "이미 인증 완료",
-                "오늘은 이미 인증하셨습니다!"
+        thread_id = ctx.channel.id
+        auth_lock = self._get_auth_lock(thread_id)
+
+        async with auth_lock:
+            # lock 획득 직후 도전 상태 재조회 (중복 처리 방지)
+            challenge = get_challenge(thread_id)
+            if not challenge:
+                embed = EmbedBuilder.error(
+                    "도전 없음",
+                    "먼저 !목표설정으로 도전을 시작하세요."
+                )
+                await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+                return
+
+            if not await self._check_ownership(ctx, challenge):
+                return
+
+            # 중복 인증 방지 (락 내부 재검증)
+            today = get_kst_now().date().isoformat()
+            self.logger.info(f"[중복 인증 체크] 사용자: {ctx.author.id}, 오늘: {today}, 마지막 인증: {challenge['last_auth_date']}")
+            if challenge['last_auth_date'] == today:
+                self.logger.warning(f"[중복 인증 차단] 사용자: {ctx.author.id}가 오늘 이미 인증함")
+                embed = EmbedBuilder.error(
+                    "이미 인증 완료",
+                    "오늘은 이미 인증하셨습니다!"
+                )
+                await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+                return
+
+            loading_message = await self._run_auth_loading_animation(ctx)
+
+            # 페널티 및 인증 처리 로직
+            from datetime import datetime
+
+            current_state = normalize_state(challenge['state'])
+            if current_state != challenge['state']:
+                update_challenge(thread_id, state=current_state)
+                challenge['state'] = current_state
+
+            valid_states = {
+                BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
+                BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
+            }
+            if current_state not in valid_states:
+                self.logger.warning(f"알 수 없는 상태값 감지: {current_state}, EGG로 복구합니다.")
+                current_state = BotStates.EGG
+                update_challenge(thread_id, state=current_state)
+                challenge['state'] = current_state
+
+            old_state = current_state
+            new_state = current_state
+            new_streak = challenge['streak']
+            new_growth = challenge['growth_days']
+            new_total = challenge['total_days']
+            message_extra = ""
+            before_snapshot = {
+                'state': challenge['state'],
+                'streak': challenge['streak'],
+                'growth_days': challenge['growth_days'],
+                'total_days': challenge['total_days'],
+                'last_auth_date': challenge['last_auth_date'],
+            }
+
+            # 마지막 인증 날짜와의 차이 계산
+            if challenge['last_auth_date']:
+                last_date = datetime.fromisoformat(challenge['last_auth_date']).date()
+                today_date = datetime.fromisoformat(today).date()
+                days_diff = (today_date - last_date).days
+            else:
+                days_diff = 1  # 첫 인증
+
+            # 상태별 처리
+            if current_state in [BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT, BotStates.ADULT]:
+                # 정상 상태
+                if days_diff == 1:
+                    # 정상 인증
+                    new_streak += 1
+                    new_growth += 1
+                    new_total += 1
+
+                    # 성장 단계 체크
+                    if new_growth >= BotConfig.GRADUATION_DAYS:
+                        new_state = BotStates.DONE
+                    elif new_growth >= BotConfig.ADULT_DAYS:
+                        new_state = BotStates.ADULT
+                    elif new_growth >= BotConfig.ADOLESCENT_DAYS:
+                        new_state = BotStates.ADOLESCENT
+                    elif new_growth >= BotConfig.HATCH_DAYS:
+                        new_state = BotStates.DUCKLING
+
+                elif days_diff == 2:
+                    # 1일 건너뛰었음 → SULKY
+                    new_state = BotStates.SULKY
+                    new_streak = 0
+                    new_total += 1
+                    message_extra = "\n\n😤 **오리가 삐쳤습니다!**\n3일 연속 인증하면 다시 돌아옵니다."
+
+                elif days_diff >= 3:
+                    # 2일 이상 건너뛰었음 → RUNAWAY
+                    new_state = BotStates.RUNAWAY
+                    new_streak = 0
+                    new_total += 1
+                    message_extra = "\n\n🏃 **오리가 가출했습니다!**\n7일 연속 인증하면 돌아옵니다."
+
+            elif current_state == BotStates.SULKY:
+                # 삐진 상태
+                if days_diff == 1:
+                    # 연속 인증 중
+                    new_streak += 1
+                    new_total += 1
+
+                    if new_streak >= BotConfig.SULKY_RECOVERY_DAYS:
+                        # 3일 연속 인증 → 복구!
+                        # growth_days로 상태 복구
+                        if new_growth >= BotConfig.ADULT_DAYS:
+                            new_state = BotStates.ADULT
+                        elif new_growth >= BotConfig.ADOLESCENT_DAYS:
+                            new_state = BotStates.ADOLESCENT
+                        elif new_growth >= BotConfig.HATCH_DAYS:
+                            new_state = BotStates.DUCKLING
+                        else:
+                            new_state = BotStates.EGG
+                        message_extra = "\n\n💚 **오리가 기분이 풀렸습니다!**"
+                    else:
+                        message_extra = f"\n\n😤 복구까지 {BotConfig.SULKY_RECOVERY_DAYS - new_streak}일 남았습니다."
+
+                elif days_diff >= 2:
+                    # 또 건너뛰었음 → RUNAWAY
+                    new_state = BotStates.RUNAWAY
+                    new_streak = 0
+                    new_total += 1
+                    message_extra = "\n\n🏃 **오리가 가출했습니다!**\n7일 연속 인증하면 돌아옵니다."
+
+            elif current_state == BotStates.RUNAWAY:
+                # 가출 상태
+                if days_diff == 1:
+                    # 연속 인증 중
+                    new_streak += 1
+                    new_total += 1
+
+                    if new_streak >= BotConfig.RUNAWAY_RECOVERY_DAYS:
+                        # 7일 연속 인증 → 복구!
+                        # growth_days로 상태 복구
+                        if new_growth >= BotConfig.ADULT_DAYS:
+                            new_state = BotStates.ADULT
+                        elif new_growth >= BotConfig.ADOLESCENT_DAYS:
+                            new_state = BotStates.ADOLESCENT
+                        elif new_growth >= BotConfig.HATCH_DAYS:
+                            new_state = BotStates.DUCKLING
+                        else:
+                            new_state = BotStates.EGG
+                        message_extra = "\n\n🏠 **오리가 집으로 돌아왔습니다!**"
+                    else:
+                        message_extra = f"\n\n🏃 복구까지 {BotConfig.RUNAWAY_RECOVERY_DAYS - new_streak}일 남았습니다."
+                else:
+                    # 또 건너뛰었음 (이미 최악)
+                    new_total += 1
+                    message_extra = "\n\n🏃 오리는 여전히 가출 중입니다..."
+
+            elif current_state == BotStates.DONE:
+                # 졸업 상태 - 인증만 기록
+                new_total += 1
+
+            # DB 업데이트
+            self.logger.info(f"[인증 DB 업데이트 시작] 사용자: {ctx.author.id}, 채널: {thread_id}, 상태: {new_state}, 연속: {new_streak}일")
+            update_success = update_challenge(
+                thread_id,
+                state=new_state,
+                streak=new_streak,
+                growth_days=new_growth,
+                total_days=new_total,
+                last_auth_date=today
             )
-            await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
-            return
-
-        # 페널티 및 인증 처리 로직
-        from datetime import datetime
-        
-        current_state = normalize_state(challenge['state'])
-        if current_state != challenge['state']:
-            update_challenge(ctx.channel.id, state=current_state)
-            challenge['state'] = current_state
-
-        valid_states = {
-            BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT,
-            BotStates.ADULT, BotStates.SULKY, BotStates.RUNAWAY, BotStates.DONE
-        }
-        if current_state not in valid_states:
-            self.logger.warning(f"알 수 없는 상태값 감지: {current_state}, EGG로 복구합니다.")
-            current_state = BotStates.EGG
-            update_challenge(ctx.channel.id, state=current_state)
-            challenge['state'] = current_state
-
-        new_state = current_state
-        new_streak = challenge['streak']
-        new_growth = challenge['growth_days']
-        new_total = challenge['total_days']
-        message_extra = ""
-        
-        # 마지막 인증 날짜와의 차이 계산
-        if challenge['last_auth_date']:
-            last_date = datetime.fromisoformat(challenge['last_auth_date']).date()
-            today_date = datetime.fromisoformat(today).date()
-            days_diff = (today_date - last_date).days
-        else:
-            days_diff = 1  # 첫 인증
-        
-        # 상태별 처리
-        if current_state in [BotStates.EGG, BotStates.DUCKLING, BotStates.ADOLESCENT, BotStates.ADULT]:
-            # 정상 상태
-            if days_diff == 1:
-                # 정상 인증
-                new_streak += 1
-                new_growth += 1
-                new_total += 1
-                
-                # 성장 단계 체크
-                if new_growth >= BotConfig.GRADUATION_DAYS:
-                    new_state = BotStates.DONE
-                elif new_growth >= BotConfig.ADULT_DAYS:
-                    new_state = BotStates.ADULT
-                elif new_growth >= BotConfig.ADOLESCENT_DAYS:
-                    new_state = BotStates.ADOLESCENT
-                elif new_growth >= BotConfig.HATCH_DAYS:
-                    new_state = BotStates.DUCKLING
-                    
-            elif days_diff == 2:
-                # 1일 건너뛰었음 → SULKY
-                new_state = BotStates.SULKY
-                new_streak = 0
-                new_total += 1
-                message_extra = "\n\n😤 **오리가 삐쳤습니다!**\n3일 연속 인증하면 다시 돌아옵니다."
-                
-            elif days_diff >= 3:
-                # 2일 이상 건너뛰었음 → RUNAWAY
-                new_state = BotStates.RUNAWAY
-                new_streak = 0
-                new_total += 1
-                message_extra = "\n\n🏃 **오리가 가출했습니다!**\n7일 연속 인증하면 돌아옵니다."
-                
-        elif current_state == BotStates.SULKY:
-            # 삐진 상태
-            if days_diff == 1:
-                # 연속 인증 중
-                new_streak += 1
-                new_total += 1
-                
-                if new_streak >= BotConfig.SULKY_RECOVERY_DAYS:
-                    # 3일 연속 인증 → 복구!
-                    new_state = BotStates.EGG  # 또는 이전 상태로
-                    # growth_days로 상태 복구
-                    if new_growth >= BotConfig.ADULT_DAYS:
-                        new_state = BotStates.ADULT
-                    elif new_growth >= BotConfig.ADOLESCENT_DAYS:
-                        new_state = BotStates.ADOLESCENT
-                    elif new_growth >= BotConfig.HATCH_DAYS:
-                        new_state = BotStates.DUCKLING
-                    else:
-                        new_state = BotStates.EGG
-                    message_extra = "\n\n💚 **오리가 기분이 풀렸습니다!**"
-                else:
-                    message_extra = f"\n\n😤 복구까지 {BotConfig.SULKY_RECOVERY_DAYS - new_streak}일 남았습니다."
-                    
-            elif days_diff >= 2:
-                # 또 건너뛰었음 → RUNAWAY
-                new_state = BotStates.RUNAWAY
-                new_streak = 0
-                new_total += 1
-                message_extra = "\n\n🏃 **오리가 가출했습니다!**\n7일 연속 인증하면 돌아옵니다."
-                
-        elif current_state == BotStates.RUNAWAY:
-            # 가출 상태
-            if days_diff == 1:
-                # 연속 인증 중
-                new_streak += 1
-                new_total += 1
-                
-                if new_streak >= BotConfig.RUNAWAY_RECOVERY_DAYS:
-                    # 7일 연속 인증 → 복구!
-                    # growth_days로 상태 복구
-                    if new_growth >= BotConfig.ADULT_DAYS:
-                        new_state = BotStates.ADULT
-                    elif new_growth >= BotConfig.ADOLESCENT_DAYS:
-                        new_state = BotStates.ADOLESCENT
-                    elif new_growth >= BotConfig.HATCH_DAYS:
-                        new_state = BotStates.DUCKLING
-                    else:
-                        new_state = BotStates.EGG
-                    message_extra = "\n\n🏠 **오리가 집으로 돌아왔습니다!**"
-                else:
-                    message_extra = f"\n\n🏃 복구까지 {BotConfig.RUNAWAY_RECOVERY_DAYS - new_streak}일 남았습니다."
+            if update_success:
+                after_snapshot = {
+                    'state': new_state,
+                    'streak': new_streak,
+                    'growth_days': new_growth,
+                    'total_days': new_total,
+                    'last_auth_date': today,
+                }
+                record_challenge_event(
+                    user_id=ctx.author.id,
+                    thread_id=thread_id,
+                    event_type='AUTH_SUCCESS',
+                    before_challenge=before_snapshot,
+                    after_challenge=after_snapshot,
+                    event_date=today,
+                    source='BOT'
+                )
             else:
-                # 또 건너뛰었음 (이미 최악)
-                new_total += 1
-                message_extra = "\n\n🏃 오리는 여전히 가출 중입니다..."
-        
-        elif current_state == BotStates.DONE:
-            # 졸업 상태 - 인증만 기록
-            new_total += 1
+                self.logger.error(f"[인증 DB 업데이트 실패] 사용자: {ctx.author.id}, 채널: {thread_id}")
+                fail_embed = EmbedBuilder.error("인증 실패", "인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
+                if loading_message:
+                    try:
+                        await loading_message.edit(embed=fail_embed)
+                    except Exception:
+                        await ctx.send(embed=fail_embed, delete_after=MESSAGE_DELETE_AFTER)
+                else:
+                    await ctx.send(embed=fail_embed, delete_after=MESSAGE_DELETE_AFTER)
+                return
 
-        # DB 업데이트
-        self.logger.info(f"[인증 DB 업데이트 시작] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 상태: {new_state}, 연속: {new_streak}일")
-        update_challenge(ctx.channel.id, state=new_state, streak=new_streak,
-                         growth_days=new_growth, total_days=new_total, last_auth_date=today)
-        self.logger.info(f"[인증 DB 업데이트 완료] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}")
+            self.logger.info(f"[인증 DB 업데이트 완료] 사용자: {ctx.author.id}, 채널: {thread_id}")
 
-        # 골드 지급 (정상 상태일 때만)
-        if new_state not in [BotStates.SULKY, BotStates.RUNAWAY]:
-            user = get_user(ctx.author.id)
-            if not user:
-                # 이 시점에서 유저가 없으면 심각한 문제
-                self.logger.error(f"[Critical] 골드 지급 실패: 유저 {ctx.author.id} 찾을 수 없음")
-                # 복구 시도
-                create_user(ctx.author.id, self._author_display_name(ctx.author))
+            # 골드 지급 (정상 상태일 때만)
+            if new_state not in [BotStates.SULKY, BotStates.RUNAWAY]:
                 user = get_user(ctx.author.id)
+                if not user:
+                    # 이 시점에서 유저가 없으면 심각한 문제
+                    self.logger.error(f"[Critical] 골드 지급 실패: 유저 {ctx.author.id} 찾을 수 없음")
+                    # 복구 시도
+                    create_user(ctx.author.id, self._author_display_name(ctx.author))
+                    user = get_user(ctx.author.id)
 
-            if user:
-                old_gold = user['gold']
-                new_gold = old_gold + BotConfig.DAILY_GOLD_REWARD
-                self.logger.info(f"[골드 지급] 사용자: {ctx.author.id}, 기존: {old_gold}G -> 신규: {new_gold}G")
+                if user:
+                    old_gold = user['gold']
+                    new_gold = old_gold + BotConfig.DAILY_GOLD_REWARD
+                    self.logger.info(f"[골드 지급] 사용자: {ctx.author.id}, 기존: {old_gold}G -> 신규: {new_gold}G")
 
-                success = update_user_inventory(ctx.author.id, new_gold, user['inventory'])
-                if not success:
-                    self.logger.error(f"[Error] 골드 업데이트 실패: 유저 {ctx.author.id}")
+                    success = update_user_inventory(ctx.author.id, new_gold, user['inventory'])
+                    if not success:
+                        self.logger.error(f"[Error] 골드 업데이트 실패: 유저 {ctx.author.id}")
+                else:
+                    self.logger.error(f"[Critical] 골드 지급 완전 실패: 유저 {ctx.author.id}")
+
+            # 결과 메시지
+            if new_state in [BotStates.SULKY, BotStates.RUNAWAY]:
+                status_text = f"**상태:** {STATE_KOREAN.get(new_state, new_state)}\n**복구 진행:** {new_streak}/{BotConfig.SULKY_RECOVERY_DAYS if new_state == BotStates.SULKY else BotConfig.RUNAWAY_RECOVERY_DAYS}일"
             else:
-                self.logger.error(f"[Critical] 골드 지급 완전 실패: 유저 {ctx.author.id}")
+                status_text = f"**연속 {new_streak}일째** 인증 중입니다!\n**성장일:** D+{new_growth}/{BotConfig.GRADUATION_DAYS}\n**상태:** {STATE_KOREAN.get(new_state, new_state)}"
 
-        # 결과 메시지
-        if new_state in [BotStates.SULKY, BotStates.RUNAWAY]:
-            status_text = f"**상태:** {STATE_KOREAN.get(new_state, new_state)}\n**복구 진행:** {new_streak}/{BotConfig.SULKY_RECOVERY_DAYS if new_state == BotStates.SULKY else BotConfig.RUNAWAY_RECOVERY_DAYS}일"
-        else:
-            status_text = f"**연속 {new_streak}일째** 인증 중입니다!\n**성장일:** D+{new_growth}/{BotConfig.GRADUATION_DAYS}\n**상태:** {STATE_KOREAN.get(new_state, new_state)}"
-        
-        embed = EmbedBuilder.success(
-            "인증 완료!",
-            status_text + message_extra
-        )
-        await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
-        self.logger.info(f"[인증 완료] 사용자: {ctx.author.id}, 채널: {ctx.channel.id}, 메시지 ID: {ctx.message.id}")
+            duck_voice_context = self._resolve_duck_voice_context(old_state, new_state)
+            previous_line = self._last_duck_line_by_thread.get(thread_id)
+            duck_line = pick_duck_line(
+                context=duck_voice_context,
+                goal_text=challenge.get('goal_text'),
+                previous_line=previous_line
+            )
+            self._last_duck_line_by_thread[thread_id] = duck_line
+
+            embed = EmbedBuilder.success(
+                "인증 완료!",
+                status_text + message_extra
+            )
+            embed.add_field(name="🗨️ 오리의 한마디", value=duck_line, inline=False)
+
+            if loading_message:
+                try:
+                    await loading_message.edit(embed=embed)
+                except Exception as e:
+                    self.logger.warning(f"[인증 완료] 로딩 메시지 편집 실패: {type(e).__name__}: {e}")
+                    await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+            else:
+                await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+
+            self.logger.info(f"[인증 완료] 사용자: {ctx.author.id}, 채널: {thread_id}, 메시지 ID: {ctx.message.id}")
 
     @commands.command(name='상태')
     async def status(self, ctx):
@@ -411,6 +570,21 @@ class ChallengeCog(commands.Cog):
             embed = EmbedBuilder.error("수정 실패", "성장일 수정 중 오류가 발생했습니다.")
             await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             return
+
+        record_challenge_event(
+            user_id=ctx.author.id,
+            thread_id=ctx.channel.id,
+            event_type='USER_EDIT',
+            before_challenge=challenge,
+            after_challenge={
+                **challenge,
+                'state': new_state,
+                'growth_days': new_growth_days,
+                'total_days': new_total_days,
+            },
+            event_date=get_kst_now().date().isoformat(),
+            source='BOT'
+        )
 
         embed = EmbedBuilder.success(
             "수정 완료",

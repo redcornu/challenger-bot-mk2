@@ -52,6 +52,7 @@ logs/
 # Test files
 test_*.py
 debug_*.py
+!tests/test_*.py
 
 # Claude Code
 .claude/
