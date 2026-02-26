@@ -78,25 +78,94 @@ class ChallengeCog(commands.Cog):
             return 'LEVEL_UP'
         return 'NORMAL_GROWTH'
 
+    def _make_progress_bar(self, filled: int, total: int) -> str:
+        return '[' + ('■' * filled) + ('□' * (total - filled)) + ']'
+
+    def _make_growth_meter(self, growth_days: int, total_days: int = 66, width: int = 12) -> str:
+        safe_growth = max(0, growth_days)
+        ratio = min(1.0, safe_growth / total_days) if total_days > 0 else 0.0
+        filled = int(round(ratio * width))
+        filled = min(width, max(0, filled))
+        return '█' * filled + '░' * (width - filled)
+
+    def _build_ansi_hud(
+        self,
+        *,
+        state: str,
+        streak: int,
+        growth_days: int,
+        total_days: int,
+        gold: int,
+        runaway_recovery_progress: str = None
+    ) -> str:
+        state_label = STATE_KOREAN.get(state, state)
+        growth_meter = self._make_growth_meter(growth_days, BotConfig.GRADUATION_DAYS)
+        state_color = {
+            BotStates.RUNAWAY: "1;31",
+            BotStates.SULKY: "1;33",
+            BotStates.DONE: "1;35",
+        }.get(state, "1;36")
+
+        lines = [
+            "\u001b[1;33m┌─ DUCK HUD ─────────────────────────┐\u001b[0m",
+            f"\u001b[1;37m│ 상태     : \u001b[{state_color}m{state_label:<20}\u001b[0m",
+            (
+                f"\u001b[1;37m│ 성장일   : \u001b[1;32mD+{growth_days:>2}/{BotConfig.GRADUATION_DAYS:<2}"
+                f"  {growth_meter}\u001b[0m"
+            ),
+            (
+                f"\u001b[1;37m│ 연속일   : \u001b[1;32m{streak:>2}일\u001b[0m"
+                f"\u001b[1;37m   총 인증: \u001b[1;36m{total_days:>3}일\u001b[0m"
+            ),
+            f"\u001b[1;37m│ GOLD     : \u001b[1;33m{gold:>4}G\u001b[0m",
+        ]
+
+        if runaway_recovery_progress:
+            lines.append(
+                (
+                    "\u001b[1;37m│ 가출 복구: "
+                    f"\u001b[1;31m{runaway_recovery_progress}\u001b[0m"
+                    f"\u001b[1;37m (목표 {BotConfig.RUNAWAY_RECOVERY_DAYS}일)\u001b[0m"
+                )
+            )
+
+        lines.append("\u001b[1;33m└───────────────────────────────────┘\u001b[0m")
+        return "```ansi\n" + "\n".join(lines) + "\n```"
+
     async def _run_auth_loading_animation(self, ctx):
         frames = [
-            '🍽️ 오늘의 도전을 잘게 준비 중... [■□□]',
-            '🥣 냠냠! 도전을 먹고 성장 에너지로 바꾸는 중... [■■□]',
-            '✨ 깃털 반짝! 오리가 자라고 있어요... [■■■]',
+            (
+                "⚔️ 오늘의 도전 처리 중",
+                "🍽️ 도전 조각을 수집합니다.\n"
+                f"진행률 33% {self._make_progress_bar(1, 3)}\n"
+                "전투 로그: 목표 에너지 추출 시작"
+            ),
+            (
+                "⚔️ 오늘의 도전 처리 중",
+                "🥣 도전을 영양분으로 변환합니다.\n"
+                f"진행률 66% {self._make_progress_bar(2, 3)}\n"
+                "전투 로그: 오리 성장 코어 충전"
+            ),
+            (
+                "⚔️ 오늘의 도전 처리 중",
+                "✨ 성장 반영을 완료합니다.\n"
+                f"진행률 100% {self._make_progress_bar(3, 3)}\n"
+                "전투 로그: 최종 스탯 동기화"
+            ),
         ]
         try:
             loading_message = await ctx.send(
-                embed=EmbedBuilder.info('인증 처리 중', frames[0]),
+                embed=EmbedBuilder.info(frames[0][0], frames[0][1]),
                 delete_after=MESSAGE_DELETE_AFTER
             )
         except Exception as e:
             self.logger.warning(f"[인증 로딩] 로딩 메시지 전송 실패: {type(e).__name__}: {e}")
             return None
 
-        for frame_text in frames[1:]:
+        for frame_title, frame_text in frames[1:]:
             await asyncio.sleep(1.5)
             try:
-                await loading_message.edit(embed=EmbedBuilder.info('인증 처리 중', frame_text))
+                await loading_message.edit(embed=EmbedBuilder.info(frame_title, frame_text))
             except Exception as e:
                 self.logger.warning(f"[인증 로딩] 로딩 메시지 edit 실패: {type(e).__name__}: {e}")
                 break
@@ -307,7 +376,8 @@ class ChallengeCog(commands.Cog):
                 elif days_diff == 2:
                     # 1일 건너뛰었음 → SULKY
                     new_state = BotStates.SULKY
-                    new_streak = 0
+                    # 삐짐 진입 당일 인증을 복구 1일차로 카운트
+                    new_streak = 1
                     new_total += 1
                     message_extra = "\n\n😤 **오리가 삐쳤습니다!**\n3일 연속 인증하면 다시 돌아옵니다."
 
@@ -440,8 +510,10 @@ class ChallengeCog(commands.Cog):
                     self.logger.error(f"[Critical] 골드 지급 완전 실패: 유저 {ctx.author.id}")
 
             # 결과 메시지
-            if new_state in [BotStates.SULKY, BotStates.RUNAWAY]:
-                status_text = f"**상태:** {STATE_KOREAN.get(new_state, new_state)}\n**복구 진행:** {new_streak}/{BotConfig.SULKY_RECOVERY_DAYS if new_state == BotStates.SULKY else BotConfig.RUNAWAY_RECOVERY_DAYS}일"
+            if new_state == BotStates.RUNAWAY:
+                status_text = f"**상태:** {STATE_KOREAN.get(new_state, new_state)}\n**가출 복구:** {new_streak}/{BotConfig.RUNAWAY_RECOVERY_DAYS}일"
+            elif new_state == BotStates.SULKY:
+                status_text = f"**상태:** {STATE_KOREAN.get(new_state, new_state)}"
             else:
                 status_text = f"**연속 {new_streak}일째** 인증 중입니다!\n**성장일:** D+{new_growth}/{BotConfig.GRADUATION_DAYS}\n**상태:** {STATE_KOREAN.get(new_state, new_state)}"
 
@@ -460,14 +532,31 @@ class ChallengeCog(commands.Cog):
             )
             embed.add_field(name="🗨️ 오리의 한마디", value=duck_line, inline=False)
 
+            final_user = get_user(ctx.author.id)
+            final_gold = final_user['gold'] if final_user else 0
+            runaway_recovery_progress = None
+            if new_state == BotStates.RUNAWAY:
+                runaway_recovery_progress = f"{new_streak}/{BotConfig.RUNAWAY_RECOVERY_DAYS}"
+            ansi_hud = self._build_ansi_hud(
+                state=new_state,
+                streak=new_streak,
+                growth_days=new_growth,
+                total_days=new_total,
+                gold=final_gold,
+                runaway_recovery_progress=runaway_recovery_progress
+            )
+
             if loading_message:
                 try:
-                    await loading_message.edit(embed=embed)
+                    await loading_message.edit(embed=embed, content=None)
                 except Exception as e:
                     self.logger.warning(f"[인증 완료] 로딩 메시지 편집 실패: {type(e).__name__}: {e}")
                     await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
             else:
                 await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+
+            # ANSI HUD는 content-only 메시지로 분리해 렌더링 안정성 확보
+            await ctx.send(content=ansi_hud, delete_after=MESSAGE_DELETE_AFTER)
 
             self.logger.info(f"[인증 완료] 사용자: {ctx.author.id}, 채널: {thread_id}, 메시지 ID: {ctx.message.id}")
 
@@ -511,6 +600,7 @@ class ChallengeCog(commands.Cog):
         embed.add_field(name="📊 도전 현황", value=progress, inline=False)
 
         # 내 정보 + 인벤토리
+        current_gold = 0
         if user:
             from cogs.shop import SHOP_ITEMS
 
@@ -520,11 +610,27 @@ class ChallengeCog(commands.Cog):
                 for name, count in inventory.items() if name in SHOP_ITEMS
             ]) or "보유한 아이템이 없습니다."
 
+            current_gold = user['gold']
             user_stats = f"💰 **골드:** {user['gold']}G\n🎓 **졸업한 오리:** {user['ducks_raised']}마리"
             embed.add_field(name="👤 내 정보", value=user_stats, inline=True)
             embed.add_field(name="🎒 인벤토리", value=items_text, inline=True)
 
+        runaway_recovery_progress = None
+        if challenge['state'] == BotStates.RUNAWAY:
+            runaway_recovery_progress = f"{challenge['streak']}/{BotConfig.RUNAWAY_RECOVERY_DAYS}"
+
+        ansi_hud = self._build_ansi_hud(
+            state=challenge['state'],
+            streak=challenge['streak'],
+            growth_days=challenge['growth_days'],
+            total_days=challenge['total_days'],
+            gold=current_gold,
+            runaway_recovery_progress=runaway_recovery_progress
+        )
+
         await ctx.send(embed=embed, delete_after=MESSAGE_DELETE_AFTER)
+        # ANSI HUD는 content-only 메시지로 분리해 렌더링 안정성 확보
+        await ctx.send(content=ansi_hud, delete_after=MESSAGE_DELETE_AFTER)
 
     @commands.command(name='수정')
     async def edit_growth_day(self, ctx, *, day_text: str):
