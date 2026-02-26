@@ -107,7 +107,7 @@ class ChallengeCog(commands.Cog):
         }.get(state, "1;36")
 
         lines = [
-            "\u001b[1;33m┌─ DUCK HUD ─────────────────────────┐\u001b[0m",
+            "\u001b[1;33m┌─ 상태창 ───────────────────────────┐\u001b[0m",
             f"\u001b[1;37m│ 상태     : \u001b[{state_color}m{state_label:<20}\u001b[0m",
             (
                 f"\u001b[1;37m│ 성장일   : \u001b[1;32mD+{growth_days:>2}/{BotConfig.GRADUATION_DAYS:<2}"
@@ -137,20 +137,17 @@ class ChallengeCog(commands.Cog):
             (
                 "⚔️ 오늘의 도전 처리 중",
                 "🍽️ 도전 조각을 수집합니다.\n"
-                f"진행률 33% {self._make_progress_bar(1, 3)}\n"
-                "전투 로그: 목표 에너지 추출 시작"
+                f"진행률 33% {self._make_progress_bar(1, 3)}"
             ),
             (
                 "⚔️ 오늘의 도전 처리 중",
                 "🥣 도전을 영양분으로 변환합니다.\n"
-                f"진행률 66% {self._make_progress_bar(2, 3)}\n"
-                "전투 로그: 오리 성장 코어 충전"
+                f"진행률 66% {self._make_progress_bar(2, 3)}"
             ),
             (
                 "⚔️ 오늘의 도전 처리 중",
                 "✨ 성장 반영을 완료합니다.\n"
-                f"진행률 100% {self._make_progress_bar(3, 3)}\n"
-                "전투 로그: 최종 스탯 동기화"
+                f"진행률 100% {self._make_progress_bar(3, 3)}"
             ),
         ]
         try:
